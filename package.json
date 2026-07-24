@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "seed": "convex run settings:seedDefaults"
+    "seed": "convex run settings:seedDefaults && convex run products:seedProducts",
+    "seed:settings": "convex run settings:seedDefaults",
+    "seed:products": "convex run products:seedProducts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.6.1",
