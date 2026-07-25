@@ -137,11 +137,10 @@ export const insertSeedProduct = internalMutation({
 
 // Placeholder — real photography lands from the client before launch (ADR-0002).
 // A 1x1 PNG is enough to prove the Convex-storage → next/image pipeline works.
-const PLACEHOLDER_IMAGE_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-
-// Placeholder copy and pricing — real client-supplied product data lands
-// before launch (ADR-0002). Keeps ticket 02 demonstrable end to end now.
+// Placeholder copy, pricing, and photography — real client-supplied product
+// data lands before launch (ADR-0002). Each SKU gets its own solid-color 8x8
+// PNG (distinct per product, not just a black square) so it's visually
+// obvious an image loaded through Convex storage rather than looking empty.
 const SEED_PRODUCTS: Array<{
   slug: string;
   name: string;
@@ -149,6 +148,7 @@ const SEED_PRODUCTS: Array<{
   priceCents: number;
   stock: number;
   sortOrder: number;
+  placeholderImageBase64: string;
 }> = [
   {
     slug: "cacao-crunch",
@@ -157,6 +157,8 @@ const SEED_PRODUCTS: Array<{
     priceCents: 499,
     stock: 40,
     sortOrder: 0,
+    placeholderImageBase64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGOIMRbHihiGlgQASPgpgeO1TpwAAAAASUVORK5CYII=",
   },
   {
     slug: "almond-fig",
@@ -165,6 +167,8 @@ const SEED_PRODUCTS: Array<{
     priceCents: 499,
     stock: 40,
     sortOrder: 1,
+    placeholderImageBase64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGM4MisHK2IYWhIA01xygXelHwYAAAAASUVORK5CYII=",
   },
   {
     slug: "peanut-butter-oat",
@@ -173,6 +177,8 @@ const SEED_PRODUCTS: Array<{
     priceCents: 499,
     stock: 40,
     sortOrder: 2,
+    placeholderImageBase64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGPYUGWDFTEMLQkAFdVZgUa2soMAAAAASUVORK5CYII=",
   },
   {
     slug: "coconut-cashew",
@@ -181,6 +187,8 @@ const SEED_PRODUCTS: Array<{
     priceCents: 499,
     stock: 40,
     sortOrder: 3,
+    placeholderImageBase64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGN4dm0rVsQwtCQAGZucQfFfO+gAAAAASUVORK5CYII=",
   },
   {
     slug: "mixed-berry",
@@ -189,6 +197,8 @@ const SEED_PRODUCTS: Array<{
     priceCents: 499,
     stock: 40,
     sortOrder: 4,
+    placeholderImageBase64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGOYreeFFTEMLQkA8Y5EwY6wfREAAAAASUVORK5CYII=",
   },
 ];
 
@@ -200,7 +210,7 @@ export const seedProducts = action({
   returns: v.array(v.id("products")),
   handler: async (ctx) => {
     const ids: Id<"products">[] = [];
-    for (const product of SEED_PRODUCTS) {
+    for (const { placeholderImageBase64, ...product } of SEED_PRODUCTS) {
       const existingId: Id<"products"> | null = await ctx.runQuery(
         internal.products.getIdBySlug,
         { slug: product.slug },
@@ -209,7 +219,7 @@ export const seedProducts = action({
         ids.push(existingId);
         continue;
       }
-      const bytes = Uint8Array.from(atob(PLACEHOLDER_IMAGE_BASE64), (c) =>
+      const bytes = Uint8Array.from(atob(placeholderImageBase64), (c) =>
         c.charCodeAt(0),
       );
       const imageId = await ctx.storage.store(
