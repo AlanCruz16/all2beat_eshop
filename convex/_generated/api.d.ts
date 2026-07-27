@@ -10,6 +10,7 @@
 
 import type * as products from "../products.js";
 import type * as settings from "../settings.js";
+import type * as stripeSync from "../stripeSync.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   products: typeof products;
   settings: typeof settings;
+  stripeSync: typeof stripeSync;
 }>;
 
 /**

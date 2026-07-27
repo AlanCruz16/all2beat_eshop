@@ -40,3 +40,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# teach-skill workspace (personal learning materials, not project code)
+/MISSION.md
+/RESOURCES.md
+/NOTES.md
+/lessons/
+/assets/
+/reference/
+/learning-records/
