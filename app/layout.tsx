@@ -4,6 +4,7 @@ import "./globals.css";
 import { ConvexClientProvider } from "./ConvexClientProvider";
 import { Nav } from "./components/Nav";
 import { Footer } from "./components/Footer";
+import { CartProvider } from "./components/CartProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,9 +33,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ConvexClientProvider>
-          <Nav />
-          <main className="flex flex-1 flex-col">{children}</main>
-          <Footer />
+          <CartProvider>
+            <Nav />
+            <main className="flex flex-1 flex-col">{children}</main>
+            <Footer />
+          </CartProvider>
         </ConvexClientProvider>
       </body>
     </html>
