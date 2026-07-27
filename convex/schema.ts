@@ -28,7 +28,12 @@ export default defineSchema({
     .index("by_active", ["active", "sortOrder"]),
 
   reservations: defineTable({
-    stripeSessionId: v.string(),
+    // Optional because the reservation is written *before* the Stripe session
+    // exists: stock is held first, then the session is created, then this is
+    // attached (masterplan §5.1 — "reserve first, release on Stripe failure").
+    // A row that never gets one is a session Stripe refused; the sweeper
+    // (ticket 07) releases it.
+    stripeSessionId: v.optional(v.string()),
     items: v.array(v.object({ productId: v.id("products"), qty: v.number() })),
     expiresAt: v.number(), // epoch ms
     status: v.union(
