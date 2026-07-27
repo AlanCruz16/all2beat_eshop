@@ -1,9 +1,10 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import {
   action,
   internalMutation,
   internalQuery,
   query,
+  type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -131,6 +132,134 @@ export const getIdBySlug = internalQuery({
   },
 });
 
+// --- Stripe mirror (ADR-0001, masterplan §6) ------------------------------
+//
+// Convex owns the Product; Stripe holds a mirrored Product/Price pair. Every
+// write that can change what Stripe should show goes through
+// `markPendingAndScheduleSync`, so a doc is never left claiming to be
+// `synced` when the mirror has moved on.
+
+// The slice of a product the sync action needs. Deliberately narrower than
+// `Doc<"products">`: stock, reserved, and images are Convex-only concerns and
+// are never mirrored.
+const productSyncViewValidator = v.object({
+  _id: v.id("products"),
+  slug: v.string(),
+  name: v.string(),
+  description: v.string(),
+  priceCents: v.number(),
+  active: v.boolean(),
+  stripeProductId: v.optional(v.string()),
+  stripePriceId: v.optional(v.string()),
+});
+export type ProductSyncView = Infer<typeof productSyncViewValidator>;
+
+export const getForSync = internalQuery({
+  args: { productId: v.id("products") },
+  returns: v.union(productSyncViewValidator, v.null()),
+  handler: async (ctx, args) => {
+    const product = await ctx.db.get(args.productId);
+    if (product === null) {
+      return null;
+    }
+    return {
+      _id: product._id,
+      slug: product.slug,
+      name: product.name,
+      description: product.description,
+      priceCents: product.priceCents,
+      active: product.active,
+      stripeProductId: product.stripeProductId,
+      stripePriceId: product.stripePriceId,
+    };
+  },
+});
+
+export const recordSyncSuccess = internalMutation({
+  args: {
+    productId: v.id("products"),
+    stripeProductId: v.string(),
+    stripePriceId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.productId, {
+      stripeProductId: args.stripeProductId,
+      stripePriceId: args.stripePriceId,
+      syncStatus: "synced",
+      syncError: undefined,
+    });
+    return null;
+  },
+});
+
+// Failure still persists whatever Stripe ids the action managed to learn. A
+// sync that created the Stripe Product and then failed on the Price has to
+// keep that id — dropping it would leave the Product orphaned in Stripe and
+// have the next attempt create a duplicate.
+export const recordSyncError = internalMutation({
+  args: {
+    productId: v.id("products"),
+    message: v.string(),
+    stripeProductId: v.optional(v.string()),
+    stripePriceId: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.productId, {
+      syncStatus: "error",
+      syncError: args.message,
+      ...(args.stripeProductId === undefined
+        ? {}
+        : { stripeProductId: args.stripeProductId }),
+      ...(args.stripePriceId === undefined
+        ? {}
+        : { stripePriceId: args.stripePriceId }),
+    });
+    return null;
+  },
+});
+
+// The one way a product write announces itself to the mirror. Callers patch
+// the doc, then call this — never the other way round.
+export async function markPendingAndScheduleSync(
+  ctx: MutationCtx,
+  productId: Id<"products">,
+) {
+  await ctx.db.patch(productId, {
+    syncStatus: "pending",
+    syncError: undefined,
+  });
+  await ctx.scheduler.runAfter(0, internal.stripeSync.syncProduct, {
+    productId,
+  });
+}
+
+// Writes the mirrored fields — the ones a change to which Stripe has to hear
+// about — and re-syncs. Ticket 10's admin form wraps this with the
+// authorization check (this mutation is internal precisely so it can't be
+// called without one) and adds the Convex-only fields: stock, images,
+// compare-at price, sort order. Those must NOT come through here — nothing
+// Stripe mirrors changes, so re-syncing on them would churn `syncStatus` and
+// spend Stripe calls for nothing. Same reason the webhook's stock decrement
+// (ticket 06) patches `stock`/`reserved` directly.
+export const updateMirroredFields = internalMutation({
+  args: {
+    productId: v.id("products"),
+    name: v.optional(v.string()),
+    description: v.optional(v.string()),
+    priceCents: v.optional(v.number()),
+    active: v.optional(v.boolean()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { productId, ...fields } = args;
+    await ctx.db.patch(productId, fields);
+    await markPendingAndScheduleSync(ctx, productId);
+    return null;
+  },
+});
+
 export const insertSeedProduct = internalMutation({
   args: {
     slug: v.string(),
@@ -150,7 +279,7 @@ export const insertSeedProduct = internalMutation({
     if (existing !== null) {
       return existing._id;
     }
-    return await ctx.db.insert("products", {
+    const productId = await ctx.db.insert("products", {
       slug: args.slug,
       name: args.name,
       description: args.description,
@@ -162,6 +291,10 @@ export const insertSeedProduct = internalMutation({
       sortOrder: args.sortOrder,
       syncStatus: "pending",
     });
+    // A seeded product is a product write like any other: it isn't sellable
+    // until it exists in Stripe.
+    await markPendingAndScheduleSync(ctx, productId);
+    return productId;
   },
 });
 
