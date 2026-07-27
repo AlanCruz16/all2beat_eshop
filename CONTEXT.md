@@ -16,7 +16,7 @@ _Avoid_: Inventory
 The portion of a Product's Stock held by Reservations for in-flight (not yet completed) Checkout Sessions.
 
 **Available stock**:
-`Stock − Reserved`. The only inventory figure ever surfaced to a guest — as a boolean or a low-stock hint, never the raw number.
+`Stock − Reserved`. The only inventory figure ever surfaced to a guest, and while browsing only as a boolean or a low-stock hint, never the raw number. The single exception is a checkout the server refuses for want of stock: there the exact figure is what tells the shopper how to get unblocked ("Only 3 left of X"), so it is stated.
 
 **Reservation**:
 A time-boxed hold on Stock, created atomically when a Checkout Session starts and matching that session's `expires_at`. Ends in one of three states: `committed` (payment succeeded, Stock is decremented), `released` (session expired, cancelled, or swept), or stays `held` until one of those happens.

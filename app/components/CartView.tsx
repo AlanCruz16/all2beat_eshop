@@ -154,14 +154,24 @@ export function CartView() {
           Shipping and any tax are calculated at checkout.
         </p>
         {progress ? <FreeShippingProgress progress={progress} /> : null}
-        <button
-          type="button"
-          disabled
-          className="rounded-md bg-black px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
-        >
-          Checkout
-        </button>
-        <p className="text-sm text-zinc-500">Checkout is not available yet.</p>
+        {/* Nothing is reserved by getting here — stock is only held once
+            /checkout creates the Stripe session (masterplan §5.1). */}
+        {pricedLines.length === 0 ? (
+          <button
+            type="button"
+            disabled
+            className="rounded-md bg-black px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
+          >
+            Checkout
+          </button>
+        ) : (
+          <Link
+            href="/checkout"
+            className="rounded-md bg-black px-5 py-2 text-center text-sm font-medium text-white dark:bg-white dark:text-black"
+          >
+            Checkout
+          </Link>
+        )}
       </div>
     </div>
   );

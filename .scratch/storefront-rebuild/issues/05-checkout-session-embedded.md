@@ -4,14 +4,32 @@
 
 **Blocked by:** 03, 04.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `createCheckoutSession` Server Action takes `[{ slug, qty }]` only; input validated at the boundary
-- [ ] Server loads the products, confirms `active === true`, and checks `stock − reserved >= qty` per line, returning a structured error the UI can render on failure
-- [ ] Stock check and reservation happen inside a single Convex mutation (atomic); reserve first, release the reservation if the Stripe call then fails
-- [ ] Session uses `ui_mode: "embedded_page"` (ADR-0003), `mode: "payment"`, `expires_at` matching the reservation TTL (30 min), `shipping_address_collection` restricted to US, `metadata.reservationId`
-- [ ] Shipping attached as dynamic `shipping_options[].shipping_rate_data` and `automatic_tax` both computed from the live `settings` row (ADR-0004) — no static Stripe `shipping_rate` objects
-- [ ] Action returns `session.client_secret`; the checkout page renders `EmbeddedCheckoutProvider` / `EmbeddedCheckout` (new deps `@stripe/stripe-js`, `@stripe/react-stripe-js`)
-- [ ] A `/checkout/return` page calls `retrieveSession` client-side to confirm `session.status` before showing success
-- [ ] Seam 1 tests cover reservation/stock math (exact-stock, over-stock, concurrent reserve, release-on-failure) and settings-driven shipping/tax math (threshold boundary, tax flag on/off)
-- [ ] The Seam 2 real-Stripe test-mode harness is established; a Seam 2 test asserts `sessions.create()` accepts our actual parameter shape (embedded, dynamic `shipping_rate_data`, `automatic_tax`)
+- [x] `createCheckoutSession` Server Action takes `[{ slug, qty }]` only; input validated at the boundary
+- [x] Server loads the products, confirms `active === true`, and checks `stock − reserved >= qty` per line, returning a structured error the UI can render on failure
+- [x] Stock check and reservation happen inside a single Convex mutation (atomic); reserve first, release the reservation if the Stripe call then fails
+- [x] Session uses `ui_mode: "embedded_page"` (ADR-0003), `mode: "payment"`, `expires_at` matching the reservation TTL (30 min), `shipping_address_collection` restricted to US, `metadata.reservationId`
+- [x] Shipping attached as dynamic `shipping_options[].shipping_rate_data` and `automatic_tax` both computed from the live `settings` row (ADR-0004) — no static Stripe `shipping_rate` objects
+- [x] Action returns `session.client_secret`; the checkout page renders `EmbeddedCheckoutProvider` / `EmbeddedCheckout` (new deps `@stripe/stripe-js`, `@stripe/react-stripe-js`)
+- [x] A `/checkout/return` page calls `retrieveSession` client-side to confirm `session.status` before showing success
+- [x] Seam 1 tests cover reservation/stock math (exact-stock, over-stock, concurrent reserve, release-on-failure) and settings-driven shipping/tax math (threshold boundary, tax flag on/off)
+- [x] The Seam 2 real-Stripe test-mode harness is established; a Seam 2 test asserts `sessions.create()` accepts our actual parameter shape (embedded, dynamic `shipping_rate_data`, `automatic_tax`)
+
+## Comments
+
+Implemented 2026-07-27. Notes for whoever picks up ticket 06 (webhook) or 07 (sweeper):
+
+- **The split is: orchestration in Next, atomicity in Convex, arithmetic in `lib/`.** `app/checkout/actions.ts` is the Server Action masterplan §5.1 asks for — it reserves, calls Stripe, and attaches or releases. `convex/checkout.ts` owns the one thing that has to be a transaction. `lib/checkout.ts` is pure (no Stripe client, no Convex), which is what makes the shipping and tax rules that decide what a shopper is charged testable as ordinary unit tests.
+- **`reserveCart` returns everything the session needs in one transaction** — priced lines, mirrored `stripePriceId`s, subtotal, `expiresAt`, and a snapshot of the `settings` row. Deliberate: prices charged, shipping rule applied, and units held are read together, so they can't drift apart between reads. Ticket 06 gets the same shape from the reservation row plus the session.
+- **A cart is all-or-nothing.** If any line fails, nothing is written and every failing line comes back at once, so the shopper fixes the whole cart in one pass rather than one refusal at a time.
+- **`reservations.stripeSessionId` is now optional.** It has to be: the row is written *before* Stripe is called ("reserve first, release on Stripe failure"). A reservation with no session id is one Stripe refused, and the sweeper releases it. Ticket 07 should treat a missing session id as normal, not as corruption.
+- **`releaseReservation` guards on `status === "held"`** and is idempotent. Ticket 06's `checkout.session.expired` handler and ticket 07's sweeper can both reach the same row; only the first may give the stock back. Reuse this mutation rather than writing a second decrement path — the double-decrement bug it prevents is silent.
+- **A product with `syncStatus !== "synced"` cannot be sold** (reason `"unsellable"`), which is where masterplan §6's "a product in error state cannot be sold" is actually enforced. It also means the seed must have finished syncing before a deployment can take checkouts.
+- **The 30-minute TTL sits exactly on Stripe's `expires_at` floor**, which is measured when Stripe receives the request — so our timestamp is always a fraction short. I had built in a one-minute cushion for that; the Seam 2 test disproved the need for it (Stripe allows ~1 minute of slack: 29 minutes out is accepted, 20 is refused) and the TTL is now the plain 30 minutes the spec asks for, with that boundary pinned by a test instead of by inference. This is the concrete thing Seam 2 bought.
+- **`retrieveSession` is a Server Action called from a client component**, not a Stripe.js call — `@stripe/stripe-js` has no session-retrieval API and the secret key can't reach a browser, so "client-side `retrieveSession`" as written in the ticket and ADR-0003 isn't literally possible. The property that mattered is preserved: the return page confirms `session.status` rather than trusting the redirect, and being a client component is also what lets it clear the cart on success and leave it alone otherwise.
+- **The checkout page creates its session once per visit, guarded by a ref.** Creating a session reserves stock, so React's development double-invoke would otherwise have a shopper holding their own inventory twice.
+- **The "Only 3 left of X" message deliberately states a raw stock number**, which browsing never does. Masterplan §5.1 step 3 asks for it verbatim, and unlike the count ticket 03's review stripped out of the cart, here the shopper is blocked and the number is the only thing that tells them how to proceed. `CONTEXT.md`'s "Available stock" entry has been amended to record the exception rather than leave the next reviewer to rediscover the argument.
+- **Seam 2 has its own config and script**, `vitest.seam2.config.ts` / `npm run test:seam2`, matched by `**/*.seam2.test.ts` and excluded from `npm test`. It reads `.env.local` through Vite's own `loadEnv` (no new dependency), skips rather than fails without a key, and **refuses to run against a live key** — an `sk_live_` there would create real Checkout Sessions. Ticket 06's `generateTestHeaderString` webhook test belongs in this harness.
+- **`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` must be set in `.env.local`** (and on Vercel) — it isn't currently set locally, and `/checkout` cannot render without it. `NEXT_PUBLIC_SITE_URL` is optional; the `return_url` origin is derived from request headers so localhost and preview URLs need no configuration.
+- Verified end to end against the dev Convex deployment and Stripe test mode: available stock 40 → 38 on reserve, a real `embedded_page` session created against the mirrored Price with `client_secret` set and `url` null, $5.00 flat shipping applied to a $9.98 subtotal, `automatic_tax` off, 30-minute expiry, correct `return_url`, and stock back to 40 on release. The embedded widget itself was not rendered in a browser — that needs the publishable key above.

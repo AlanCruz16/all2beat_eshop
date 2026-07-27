@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:seam2": "vitest run --config vitest.seam2.config.ts",
     "seed": "convex run settings:seedDefaults && convex run products:seedProducts",
     "seed:settings": "convex run settings:seedDefaults",
     "seed:products": "convex run products:seedProducts"
