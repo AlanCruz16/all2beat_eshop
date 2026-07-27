@@ -12,5 +12,9 @@ import { v } from "convex/values";
 export default defineApp({
   env: {
     STRIPE_SECRET_KEY: v.optional(v.string()),
+    // The webhook's signing secret (ticket 06). Deployment-scoped like the
+    // above — and unlike it, never in `.env.local`: the endpoint that reads it
+    // only ever runs here.
+    STRIPE_WEBHOOK_SECRET: v.optional(v.string()),
   },
 });

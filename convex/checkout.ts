@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, type MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { MAX_CART_SLUGS } from "./products";
 
@@ -172,9 +172,14 @@ export const reserveCart = mutation({
 
     const expiresAt = Date.now() + RESERVATION_TTL_MS;
     const reservationId = await ctx.db.insert("reservations", {
+      // Priced here, not at commit time: this is the price the Stripe session
+      // charges against, so it is the one the order must record (see the
+      // `reservations` comment in `schema.ts`).
       items: reserved.map(({ product, qty }) => ({
         productId: product._id,
         qty,
+        name: product.name,
+        unitPriceCents: product.priceCents,
       })),
       expiresAt,
       status: "held",
@@ -243,22 +248,37 @@ export const releaseReservation = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const reservation = await ctx.db.get(args.reservationId);
-    if (reservation === null || reservation.status !== "held") {
+    if (reservation === null) {
       return null;
     }
-    await ctx.db.patch(args.reservationId, { status: "released" });
-    for (const item of reservation.items) {
-      const product = await ctx.db.get(item.productId);
-      if (product === null) {
-        continue;
-      }
-      // Clamped because releasing must never manufacture negative reserve —
-      // a product deleted and recreated, or hand-edited stock, shouldn't leave
-      // the counter below zero.
-      await ctx.db.patch(item.productId, {
-        reserved: Math.max(0, product.reserved - item.qty),
-      });
-    }
+    await releaseHeldReservation(ctx, reservation);
     return null;
   },
 });
+
+// The one place a hold is given back, shared by the Stripe-failure rollback
+// above, the `checkout.session.expired` webhook (`orders.ts`) and the sweeper
+// (ticket 07) — three callers that can all reach the same row, of which only
+// the first may move the counter. `held` is the guard that makes
+// double-decrementing impossible, so it lives here rather than in each caller.
+export async function releaseHeldReservation(
+  ctx: MutationCtx,
+  reservation: Doc<"reservations">,
+): Promise<void> {
+  if (reservation.status !== "held") {
+    return;
+  }
+  await ctx.db.patch(reservation._id, { status: "released" });
+  for (const item of reservation.items) {
+    const product = await ctx.db.get(item.productId);
+    if (product === null) {
+      continue;
+    }
+    // Clamped because releasing must never manufacture negative reserve —
+    // a product deleted and recreated, or hand-edited stock, shouldn't leave
+    // the counter below zero.
+    await ctx.db.patch(item.productId, {
+      reserved: Math.max(0, product.reserved - item.qty),
+    });
+  }
+}
