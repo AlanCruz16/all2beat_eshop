@@ -89,6 +89,36 @@ export const getBySlug = query({
   },
 });
 
+// Upper bound on how many distinct products one cart can ask about, so a
+// hand-edited localStorage cart can't turn one query into unbounded reads.
+export const MAX_CART_SLUGS = 50;
+
+// Live pricing for the slugs a cart is holding. The cart stores slugs and
+// quantities only (masterplan §5.1), so this is what every figure the shopper
+// sees is computed from — a price edited in /admin takes effect immediately,
+// and a stale price can never be displayed. Unknown or inactive slugs are
+// simply absent from the result; the cart UI surfaces those as unavailable.
+export const listBySlugs = query({
+  args: { slugs: v.array(v.string()) },
+  returns: v.array(productSummaryValidator),
+  handler: async (ctx, args) => {
+    const slugs = [...new Set(args.slugs)].slice(0, MAX_CART_SLUGS);
+    const products = await Promise.all(
+      slugs.map((slug) =>
+        ctx.db
+          .query("products")
+          .withIndex("by_slug", (q) => q.eq("slug", slug))
+          .unique(),
+      ),
+    );
+    return await Promise.all(
+      products
+        .filter((p): p is Doc<"products"> => p !== null && p.active)
+        .map((p) => toProductSummary(ctx, p)),
+    );
+  },
+});
+
 export const getIdBySlug = internalQuery({
   args: { slug: v.string() },
   returns: v.union(v.id("products"), v.null()),

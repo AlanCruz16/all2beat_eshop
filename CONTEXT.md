@@ -21,6 +21,10 @@ The portion of a Product's Stock held by Reservations for in-flight (not yet com
 **Reservation**:
 A time-boxed hold on Stock, created atomically when a Checkout Session starts and matching that session's `expires_at`. Ends in one of three states: `committed` (payment succeeded, Stock is decremented), `released` (session expired, cancelled, or swept), or stays `held` until one of those happens.
 
+**Cart**:
+A shopper's in-progress selection, held only in their own browser (`localStorage`) as Product slugs and quantities — never prices, and never on the server. Priced live from Products on every render, so an Admin price change takes effect immediately and a stale price can never be displayed. Holds no Reservation: nothing is held back from other shoppers until a Checkout Session starts.
+_Avoid_: Basket
+
 **Order**:
 An immutable snapshot of a completed purchase — line items, prices, and shipping address exactly as they were at time of sale. Never reconstructed by joining back to the live Product table; Product names and prices change, Orders must not.
 

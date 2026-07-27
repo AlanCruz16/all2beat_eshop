@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CartLink } from "./CartLink";
 
 const LINKS = [
   { href: "/shop", label: "Shop" },
@@ -24,6 +25,9 @@ export function Nav() {
               </Link>
             </li>
           ))}
+          <li>
+            <CartLink />
+          </li>
         </ul>
       </nav>
     </header>

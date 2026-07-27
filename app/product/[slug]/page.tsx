@@ -5,6 +5,7 @@ import { fetchQuery } from "convex/nextjs";
 import { api } from "@/convex/_generated/api";
 import { formatPriceCents } from "@/lib/format";
 import { StockBadge } from "@/app/components/StockBadge";
+import { AddToCart } from "@/app/components/AddToCart";
 
 type Params = { slug: string };
 
@@ -84,6 +85,11 @@ export default async function ProductPage({
         <p className="whitespace-pre-line text-zinc-600 dark:text-zinc-400">
           {product.description}
         </p>
+        <AddToCart
+          slug={product.slug}
+          name={product.name}
+          availability={product.availability}
+        />
       </div>
     </div>
   );
