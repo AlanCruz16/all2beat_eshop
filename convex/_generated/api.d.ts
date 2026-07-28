@@ -9,6 +9,8 @@
  */
 
 import type * as checkout from "../checkout.js";
+import type * as http from "../http.js";
+import type * as orders from "../orders.js";
 import type * as products from "../products.js";
 import type * as settings from "../settings.js";
 import type * as stripeSync from "../stripeSync.js";
@@ -21,6 +23,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   checkout: typeof checkout;
+  http: typeof http;
+  orders: typeof orders;
   products: typeof products;
   settings: typeof settings;
   stripeSync: typeof stripeSync;

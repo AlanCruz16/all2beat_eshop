@@ -1,6 +1,18 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// Exported so the webhook's mutation args derive from the stored shape rather
+// than restating it (`orders.ts`) — one edit adds a field, not three.
+export const shippingAddressValidator = v.object({
+  name: v.string(),
+  line1: v.string(),
+  line2: v.optional(v.string()),
+  city: v.string(),
+  state: v.string(),
+  postalCode: v.string(),
+  country: v.string(),
+});
+
 export default defineSchema({
   products: defineTable({
     slug: v.string(), // URL key, unique
@@ -34,7 +46,23 @@ export default defineSchema({
     // A row that never gets one is a session Stripe refused; the sweeper
     // (ticket 07) releases it.
     stripeSessionId: v.optional(v.string()),
-    items: v.array(v.object({ productId: v.id("products"), qty: v.number() })),
+    // Priced at reserve time, because that is the price Stripe charges: the
+    // session holds the `stripePriceId` captured then, so an Admin price change
+    // during the 30-minute hold does not follow the shopper. The webhook copies
+    // these straight onto the order (ticket 06) rather than re-reading the
+    // product, which by then may say something else.
+    //
+    // `name`/`unitPriceCents` are optional only so rows written before ticket 06
+    // still validate; `reserveCart` always writes them, and the webhook falls
+    // back to the product doc for the older rows.
+    items: v.array(
+      v.object({
+        productId: v.id("products"),
+        qty: v.number(),
+        name: v.optional(v.string()),
+        unitPriceCents: v.optional(v.number()),
+      }),
+    ),
     expiresAt: v.number(), // epoch ms
     status: v.union(
       v.literal("held"),
@@ -62,15 +90,7 @@ export default defineSchema({
     shippingCents: v.number(),
     taxCents: v.number(),
     totalCents: v.number(),
-    shippingAddress: v.object({
-      name: v.string(),
-      line1: v.string(),
-      line2: v.optional(v.string()),
-      city: v.string(),
-      state: v.string(),
-      postalCode: v.string(),
-      country: v.string(),
-    }),
+    shippingAddress: shippingAddressValidator,
     status: v.union(
       v.literal("paid"),
       v.literal("shipped"),
@@ -83,7 +103,10 @@ export default defineSchema({
     shippedAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
-    .index("by_session", ["stripeSessionId"]),
+    .index("by_session", ["stripeSessionId"])
+    // How `charge.refunded` finds the order: a refund event names the payment
+    // intent, never the checkout session (masterplan §5.2).
+    .index("by_payment_intent", ["stripePaymentIntentId"]),
 
   stripeEvents: defineTable({
     eventId: v.string(), // idempotency guard
