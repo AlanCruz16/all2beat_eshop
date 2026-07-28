@@ -9,6 +9,7 @@
  */
 
 import type * as checkout from "../checkout.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as orders from "../orders.js";
 import type * as products from "../products.js";
@@ -23,6 +24,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   checkout: typeof checkout;
+  crons: typeof crons;
   http: typeof http;
   orders: typeof orders;
   products: typeof products;
