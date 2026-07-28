@@ -5,6 +5,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { MAX_CART_SLUGS } from "./products";
 
 // Reservations and the Stripe session must expire together, so this one number
@@ -263,7 +264,9 @@ export const releaseReservation = mutation({
 // One sweep is one transaction, so it has to stay well inside Convex's
 // per-mutation read/write limits. At a store this size the expired backlog
 // between two five-minute runs is a handful of rows; the cap only matters after
-// an outage, and the leftovers go on the next run five minutes later.
+// an outage — and a full batch chains straight into another run rather than
+// waiting five minutes, so a backlog never outlasts the "few minutes" the stock
+// is promised back in.
 export const SWEEP_BATCH_SIZE = 100;
 
 // The safety net (masterplan §5.3): a shopper who starts a checkout and walks
@@ -288,6 +291,13 @@ export const sweepExpiredReservations = internalMutation({
 
     for (const reservation of expired) {
       await releaseHeldReservation(ctx, reservation);
+    }
+
+    // A full batch means there is probably more behind it. Chaining a fresh
+    // transaction drains the backlog now instead of one batch per five minutes,
+    // while keeping each transaction small.
+    if (expired.length === SWEEP_BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.checkout.sweepExpiredReservations, {});
     }
     return { released: expired.length };
   },

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -13,6 +13,10 @@ import { SWEEP_BATCH_SIZE } from "./checkout";
 const modules = import.meta.glob("./**/*.ts");
 
 const HOUR_MS = 60 * 60_000;
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 async function setup() {
   const t = convexTest(schema, modules);
@@ -185,7 +189,8 @@ test("sweeping twice does not hand the same units back twice", async () => {
   expect(await readReserved(t, productId)).toBe(0);
 });
 
-test("a backlog larger than one batch is cleared by successive sweeps", async () => {
+test("a backlog larger than one batch drains without waiting for the next cron", async () => {
+  vi.useFakeTimers();
   const { t, productId } = await setup();
   const backlog = SWEEP_BATCH_SIZE + 3;
   for (let index = 0; index < backlog; index += 1) {
@@ -196,13 +201,31 @@ test("a backlog larger than one batch is cleared by successive sweeps", async ()
     });
   }
 
+  // One transaction takes its cap and hands the rest to the next one, so the
+  // tail of a backlog is not stuck behind another five-minute wait.
   const first = await t.mutation(internal.checkout.sweepExpiredReservations, {});
   expect(first).toEqual({ released: SWEEP_BATCH_SIZE });
   expect(await readReserved(t, productId)).toBe(3);
 
-  const second = await t.mutation(internal.checkout.sweepExpiredReservations, {});
-  expect(second).toEqual({ released: 3 });
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
   expect(await readReserved(t, productId)).toBe(0);
+});
+
+test("a sweep that did not fill its batch schedules no follow-up", async () => {
+  const { t, productId } = await setup();
+  await insertReservation(t, productId, {
+    status: "held",
+    expiresAt: Date.now() - HOUR_MS,
+    qty: 1,
+  });
+
+  await t.mutation(internal.checkout.sweepExpiredReservations, {});
+
+  expect(
+    await t.run(
+      async (ctx) => await ctx.db.system.query("_scheduled_functions").collect(),
+    ),
+  ).toEqual([]);
 });
 
 test("the sweep runs every five minutes", async () => {
