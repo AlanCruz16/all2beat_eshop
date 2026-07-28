@@ -14,11 +14,14 @@ import { requireAdmin } from "./authz";
 export const assertAdminAccess = mutation({
   args: {},
   returns: v.object({
-    subject: v.string(),
+    // `tokenIdentifier`, not `subject` — it is the identifier that is unique
+    // across providers, and it is the one 09–11 should key off if they ever
+    // need to record who did something.
+    tokenIdentifier: v.string(),
     email: v.optional(v.string()),
   }),
   handler: async (ctx) => {
     const identity = await requireAdmin(ctx);
-    return { subject: identity.subject, email: identity.email };
+    return { tokenIdentifier: identity.tokenIdentifier, email: identity.email };
   },
 });

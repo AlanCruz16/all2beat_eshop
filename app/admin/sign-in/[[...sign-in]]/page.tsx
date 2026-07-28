@@ -1,5 +1,10 @@
 import { SignIn } from "@clerk/nextjs";
 
+export const metadata = {
+  title: "Sign in",
+  robots: { index: false, follow: false },
+};
+
 // The one and only sign-in page on the site. It sits under `/admin` so the
 // owner has a single URL to remember, but outside the `(shell)` route group so
 // the shell's admin check does not 404 the page you go to in order to become

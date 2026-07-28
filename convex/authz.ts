@@ -1,18 +1,11 @@
 import type { Auth, UserIdentity } from "convex/server";
+import { ADMIN_ROLE, ROLE_CLAIM } from "../lib/admin-role";
 
-// The store has exactly one admin and no tiering (CONTEXT.md "Admin"), so
-// authorization is a single string comparison — not a permissions table, not a
-// role hierarchy. Keep it that way; multiple admins and permission tiers are an
-// explicit non-goal of this build.
-export const ADMIN_ROLE = "admin";
-
-// Where the role lives in the JWT. Clerk copies `user.public_metadata` into
-// this claim on both the session token (read by middleware/`auth()`) and the
-// `convex` JWT template (read here) — see the ticket-08 notes in
-// `.scratch/storefront-rebuild/issues/08-admin-access-shell.md`. A role
-// anywhere *else* on the identity is not a role: only what Clerk itself put in
-// this claim counts.
-const ROLE_CLAIM = "publicMetadata";
+// The role is read from the `publicMetadata` claim of the `convex` JWT
+// template and nowhere else — see the ticket-08 notes in
+// `.scratch/storefront-rebuild/issues/08-admin-access-shell.md` for the Clerk
+// Dashboard setup. A role anywhere *else* on the identity is not a role: only
+// what Clerk itself put in that claim counts.
 
 function roleOf(identity: UserIdentity): string | null {
   const metadata = identity[ROLE_CLAIM];

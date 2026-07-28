@@ -69,10 +69,11 @@ describe("requireAdmin, via a guarded write-mutation", () => {
     const t = convexTest(schema, modules);
     const asAdmin = t.withIdentity(adminIdentity);
 
-    await expect(asAdmin.mutation(api.admin.assertAdminAccess, {})).resolves
-      .toEqual({
-        subject: "user_admin",
-        email: "owner@all2beat.com",
-      });
+    await expect(
+      asAdmin.mutation(api.admin.assertAdminAccess, {}),
+    ).resolves.toEqual({
+      tokenIdentifier: "https://clerk.test|user_admin",
+      email: "owner@all2beat.com",
+    });
   });
 });

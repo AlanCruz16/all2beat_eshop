@@ -4,6 +4,13 @@ import { UserButton } from "@clerk/nextjs";
 import { isAdminClaims } from "@/lib/admin-role";
 import { AdminNav } from "@/app/admin/(shell)/AdminNav";
 
+// Nothing under /admin belongs in a search index — least of all a login page
+// for a store with exactly one account.
+export const metadata = {
+  title: "Store admin",
+  robots: { index: false, follow: false },
+};
+
 // This layout wraps every admin screen but *not* `/admin/sign-in`, which sits
 // outside the `(shell)` route group precisely so an unauthenticated owner can
 // reach it without tripping the check below.
