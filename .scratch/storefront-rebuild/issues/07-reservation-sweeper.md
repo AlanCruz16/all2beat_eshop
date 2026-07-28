@@ -4,10 +4,10 @@
 
 **Blocked by:** 05 (independent of 06).
 
-**Status:** ready-for-verification
+**Status:** done
 
 - [x] A Convex cron runs every 5 minutes
 - [x] It finds reservations where `status === "held"` and `expiresAt < now`, sets them `released`, and decrements `reserved`
 - [x] `committed` and already-`released` reservations are never touched
 - [x] Seam 1 tests confirm only held-and-expired rows are released and that committed/released rows are left untouched
-- [ ] Done when: a deliberately abandoned session's reservation is released within a few minutes and the stock is available again
+- [x] Done when: a deliberately abandoned session's reservation is released within a few minutes and the stock is available again
