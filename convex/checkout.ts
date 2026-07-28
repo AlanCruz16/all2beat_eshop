@@ -1,5 +1,9 @@
 import { v } from "convex/values";
-import { mutation, type MutationCtx } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  type MutationCtx,
+} from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { MAX_CART_SLUGS } from "./products";
 
@@ -253,6 +257,39 @@ export const releaseReservation = mutation({
     }
     await releaseHeldReservation(ctx, reservation);
     return null;
+  },
+});
+
+// One sweep is one transaction, so it has to stay well inside Convex's
+// per-mutation read/write limits. At a store this size the expired backlog
+// between two five-minute runs is a handful of rows; the cap only matters after
+// an outage, and the leftovers go on the next run five minutes later.
+export const SWEEP_BATCH_SIZE = 100;
+
+// The safety net (masterplan §5.3): a shopper who starts a checkout and walks
+// away must not lock up stock indefinitely. Stripe's `checkout.session.expired`
+// usually gets there first, but it can be late, dropped, or never sent at all —
+// for a session Stripe refused, no event exists to be sent. This owes nothing to
+// those events and finds the rows by state alone.
+export const sweepExpiredReservations = internalMutation({
+  args: {},
+  // Returned rather than logged so a run is observable — the cron's own history
+  // shows how much each sweep actually had to release.
+  returns: v.object({ released: v.number() }),
+  handler: async (ctx) => {
+    // `by_status_expiry` is what makes this cheap: the scan touches only held
+    // rows already past their expiry, never the committed history behind them.
+    const expired = await ctx.db
+      .query("reservations")
+      .withIndex("by_status_expiry", (q) =>
+        q.eq("status", "held").lt("expiresAt", Date.now()),
+      )
+      .take(SWEEP_BATCH_SIZE);
+
+    for (const reservation of expired) {
+      await releaseHeldReservation(ctx, reservation);
+    }
+    return { released: expired.length };
   },
 });
 
