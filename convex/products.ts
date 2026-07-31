@@ -1,6 +1,6 @@
 import { v, type Infer } from "convex/values";
 import {
-  action,
+  internalAction,
   internalMutation,
   internalQuery,
   query,
@@ -368,7 +368,12 @@ const SEED_PRODUCTS: Array<{
 // Idempotent: skips any SKU whose slug already exists, so this is safe to
 // re-run against the same deployment. `ctx.storage.store` requires an
 // action, hence this isn't an internalMutation like settings.seedDefaults.
-export const seedProducts = action({
+//
+// Internal, not public: it writes products and stores blobs, and the only
+// caller is `npm run seed` — which reaches internal functions fine, because
+// `convex run` authenticates with deployment credentials. A public version
+// would let anyone holding the deployment URL resurrect seed SKUs.
+export const seedProducts = internalAction({
   args: {},
   returns: v.array(v.id("products")),
   handler: async (ctx) => {
