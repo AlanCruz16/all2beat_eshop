@@ -1,9 +1,28 @@
 import { v } from "convex/values";
-import { internalMutation, type MutationCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import {
+  env,
+  internalMutation,
+  mutation,
+  query,
+  type MutationCtx,
+} from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { releaseHeldReservation } from "./checkout";
-import { shippingAddressValidator } from "./schema";
+import { requireAdmin } from "./authz";
+import { MAX_ORDERS_LISTED } from "../lib/orders";
+import {
+  orderItemValidator,
+  orderStatusValidator,
+  orderValidator,
+  shippingAddressValidator,
+} from "./schema";
 
+// Orders have exactly two writers: Stripe, through the webhook mutations in the
+// first half of this file, and the store owner, through the admin functions in
+// the second (ticket 09).
+
+// --- Stripe webhook deliveries -------------------------------------------
+//
 // What a verified Stripe webhook delivery does to our tables (masterplan §5.2).
 // The HTTP endpoint itself is `http.ts`: it verifies the signature and pulls
 // the handful of fields below out of the Stripe object, so everything here is
@@ -206,6 +225,171 @@ export const recordChargeRefunded = internalMutation({
       return null;
     }
     await ctx.db.patch(order._id, { status: "refunded" });
+    return null;
+  },
+});
+
+// --- /admin Orders (ticket 09) --------------------------------------------
+//
+// The store owner's daily triage view. Every function here opens with
+// `requireAdmin` (ticket 08): orders carry customer names, addresses, and
+// emails, so the read paths are guarded exactly as tightly as the writes.
+
+const orderSummaryValidator = orderValidator
+  .pick("paidAt", "email", "totalCents", "status", "trackingNumber")
+  .extend({
+    _id: v.id("orders"),
+    // Enough to recognise the order in a list; the full priced snapshot is on
+    // the detail screen.
+    items: v.array(orderItemValidator.pick("name", "qty")),
+  });
+
+/**
+ * The orders list, newest first, optionally narrowed to one status.
+ *
+ * Ordered by `_creationTime` rather than `paidAt` — they are written in the
+ * same mutation and so agree, and only the former is an index Convex can walk
+ * backwards. The status filter rides the `by_status` index, whose trailing
+ * `_creationTime` column gives newest-first within a status for free.
+ */
+export const list = query({
+  args: { status: v.optional(orderStatusValidator) },
+  returns: v.array(orderSummaryValidator),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const status = args.status;
+    const rows = await (
+      status === undefined
+        ? ctx.db.query("orders")
+        : ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", status))
+    )
+      .order("desc")
+      .take(MAX_ORDERS_LISTED);
+
+    return rows.map((order) => ({
+      _id: order._id,
+      paidAt: order.paidAt,
+      email: order.email,
+      totalCents: order.totalCents,
+      status: order.status,
+      trackingNumber: order.trackingNumber,
+      items: order.items.map((item) => ({ name: item.name, qty: item.qty })),
+    }));
+  },
+});
+
+// Which half of Stripe an order lives in isn't recoverable from a payment
+// intent id, so it comes from the key this deployment talks to Stripe with.
+// Defaulting to live mode when the key is absent is the harmless direction: a
+// live link opened from a test deployment 404s in the Dashboard, whereas a
+// /test/ link to a real payment would look like the payment had vanished.
+function stripePaymentUrl(paymentIntentId: string | undefined): string | null {
+  if (paymentIntentId === undefined) {
+    return null;
+  }
+  const testMode = env.STRIPE_SECRET_KEY?.startsWith("sk_test_") ?? false;
+  return `https://dashboard.stripe.com/${testMode ? "test/" : ""}payments/${paymentIntentId}`;
+}
+
+/**
+ * One order, with everything needed to fulfill it.
+ *
+ * Takes the id as a string and normalizes it rather than declaring
+ * `v.id("orders")`: the caller is a URL path segment, and a mistyped one
+ * should render "order not found" instead of throwing an argument-validation
+ * error at the screen.
+ */
+export const get = query({
+  args: { orderId: v.string() },
+  returns: v.union(
+    orderValidator.extend({
+      _id: v.id("orders"),
+      _creationTime: v.number(),
+      // The link out to the matching payment, built here because only the
+      // server knows which Stripe mode this deployment is pointed at.
+      stripePaymentUrl: v.union(v.string(), v.null()),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const orderId = ctx.db.normalizeId("orders", args.orderId);
+    if (orderId === null) {
+      return null;
+    }
+    const order = await ctx.db.get(orderId);
+    if (order === null) {
+      return null;
+    }
+    return {
+      ...order,
+      stripePaymentUrl: stripePaymentUrl(order.stripePaymentIntentId),
+    };
+  },
+});
+
+// A submitted-but-blank box means "no tracking number" / "no note", not the
+// empty string. An *absent* argument is a different thing entirely and never
+// reaches here — see `markShipped`.
+function trimmedOrUndefined(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+// Unlike the read paths, the mutations take a real `Id<"orders">`: their caller
+// is a screen holding an order it already loaded, not a URL segment, so a
+// malformed id here is a bug and should be rejected by argument validation.
+async function loadOrderAsAdmin(ctx: MutationCtx, orderId: Id<"orders">) {
+  await requireAdmin(ctx);
+  const order = await ctx.db.get(orderId);
+  if (order === null) {
+    throw new Error("No such order");
+  }
+  return order;
+}
+
+/**
+ * Records fulfillment: status `shipped`, `shippedAt`, and an optional tracking
+ * number (spec user story 29).
+ *
+ * Re-marking an already-shipped order is allowed — it is how a mistyped
+ * tracking number gets fixed — and keeps the original `shippedAt`, because the
+ * correction is not a second shipment. A refunded or cancelled order is
+ * refused: shipping it would overwrite a status the Stripe Dashboard is the
+ * source of truth for (story 31), silently undoing the refund in these records.
+ *
+ * Omitting `trackingNumber` leaves whatever is stored alone; passing a blank
+ * one clears it. "Optional" means the caller may not have one to give, not that
+ * not giving one erases the number a previous call recorded.
+ */
+export const markShipped = mutation({
+  args: { orderId: v.id("orders"), trackingNumber: v.optional(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const order = await loadOrderAsAdmin(ctx, args.orderId);
+    if (order.status === "refunded" || order.status === "cancelled") {
+      throw new Error(`Cannot mark a ${order.status} order shipped`);
+    }
+    await ctx.db.patch(order._id, {
+      status: "shipped",
+      shippedAt: order.shippedAt ?? Date.now(),
+      ...(args.trackingNumber === undefined
+        ? {}
+        : { trackingNumber: trimmedOrUndefined(args.trackingNumber) }),
+    });
+    return null;
+  },
+});
+
+// The internal note (story 30) — one editable field on the order, never shown
+// to the customer. `note` is required, not optional: saving is always the whole
+// box, and an empty box clears the note.
+export const saveNote = mutation({
+  args: { orderId: v.id("orders"), note: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const order = await loadOrderAsAdmin(ctx, args.orderId);
+    await ctx.db.patch(order._id, { notes: trimmedOrUndefined(args.note) });
     return null;
   },
 });
