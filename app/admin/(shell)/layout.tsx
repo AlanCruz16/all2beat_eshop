@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { isAdminClaims } from "@/lib/admin-role";
 import { AdminNav } from "@/app/admin/(shell)/AdminNav";
+import { AdminAuthed } from "@/app/admin/(shell)/AdminAuthed";
 
 // Nothing under /admin belongs in a search index — least of all a login page
 // for a store with exactly one account.
@@ -39,7 +40,9 @@ export default async function AdminLayout({
         <UserButton />
       </header>
       <AdminNav />
-      <div className="flex flex-1 flex-col">{children}</div>
+      <div className="flex flex-1 flex-col">
+        <AdminAuthed>{children}</AdminAuthed>
+      </div>
     </div>
   );
 }
