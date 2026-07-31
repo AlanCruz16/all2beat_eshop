@@ -1,11 +1,7 @@
-// Orders is the default admin landing screen; ticket 09 fills this in.
+import { OrdersList } from "./OrdersList";
+
+// Orders is the default admin landing screen (masterplan §7): the owner lands
+// on their newest business, not on a dashboard.
 export default function AdminOrdersPage() {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-lg font-medium">Orders</h2>
-      <p className="text-sm text-zinc-500">
-        The orders list lands here (ticket 09).
-      </p>
-    </section>
-  );
+  return <OrdersList />;
 }

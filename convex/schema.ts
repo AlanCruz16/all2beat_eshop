@@ -3,6 +3,25 @@ import { v } from "convex/values";
 
 // Exported so the webhook's mutation args derive from the stored shape rather
 // than restating it (`orders.ts`) — one edit adds a field, not three.
+// The four states an order can be in. Exported for the same reason as the
+// address below: `/admin`'s status filter and its mutations validate against
+// the stored union rather than restating it.
+export const orderStatusValidator = v.union(
+  v.literal("paid"),
+  v.literal("shipped"),
+  v.literal("refunded"),
+  v.literal("cancelled"),
+);
+
+// One line of an order's snapshot — the name and price as they were at time of
+// sale, never re-read from `products` (CONTEXT.md "Order").
+export const orderItemValidator = v.object({
+  productId: v.id("products"),
+  name: v.string(),
+  unitPriceCents: v.number(),
+  qty: v.number(),
+});
+
 export const shippingAddressValidator = v.object({
   name: v.string(),
   line1: v.string(),
@@ -78,25 +97,13 @@ export default defineSchema({
     stripePaymentIntentId: v.optional(v.string()),
     email: v.string(),
     // snapshot — never join back to products for historical display
-    items: v.array(
-      v.object({
-        productId: v.id("products"),
-        name: v.string(),
-        unitPriceCents: v.number(),
-        qty: v.number(),
-      }),
-    ),
+    items: v.array(orderItemValidator),
     subtotalCents: v.number(),
     shippingCents: v.number(),
     taxCents: v.number(),
     totalCents: v.number(),
     shippingAddress: shippingAddressValidator,
-    status: v.union(
-      v.literal("paid"),
-      v.literal("shipped"),
-      v.literal("refunded"),
-      v.literal("cancelled"),
-    ),
+    status: orderStatusValidator,
     trackingNumber: v.optional(v.string()),
     notes: v.optional(v.string()),
     paidAt: v.number(),

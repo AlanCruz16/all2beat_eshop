@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 // The three screens the admin ever has (masterplan §7). Orders is `/admin`
-// itself because it is the daily landing view, not a sub-page of one.
-const LINKS = [
-  { href: "/admin", label: "Orders" },
+// itself because it is the daily landing view, not a sub-page of one — but a
+// single order lives at `/admin/orders/<id>`, so its tab needs a prefix to stay
+// lit while one is open. The other two match exactly; they have no sub-pages.
+const LINKS: Array<{ href: string; label: string; alsoUnder?: string }> = [
+  { href: "/admin", label: "Orders", alsoUnder: "/admin/orders" },
   { href: "/admin/products", label: "Products" },
   { href: "/admin/settings", label: "Settings" },
 ];
@@ -18,7 +20,10 @@ export function AdminNav() {
     <nav>
       <ul className="flex gap-6 text-sm">
         {LINKS.map((link) => {
-          const isCurrent = pathname === link.href;
+          const isCurrent =
+            pathname === link.href ||
+            (link.alsoUnder !== undefined &&
+              pathname.startsWith(`${link.alsoUnder}/`));
           return (
             <li key={link.href}>
               <Link
