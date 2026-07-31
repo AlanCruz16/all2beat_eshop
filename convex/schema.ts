@@ -53,29 +53,39 @@ export const orderValidator = v.object({
   shippedAt: v.optional(v.number()),
 });
 
-export default defineSchema({
-  products: defineTable({
-    slug: v.string(), // URL key, unique
-    name: v.string(),
-    description: v.string(), // markdown allowed
-    priceCents: v.number(), // canonical price, USD cents
-    compareAtCents: v.optional(v.number()), // for strikethrough pricing
-    imageIds: v.array(v.id("_storage")), // Convex file storage
-    stock: v.number(), // physical on-hand
-    reserved: v.number(), // held by in-flight checkouts
-    active: v.boolean(), // visible in storefront
-    sortOrder: v.number(),
+// A product's mirror state in Stripe (CONTEXT.md "Sync status"). Exported for
+// the same reason as the order status above: /admin's row validator names the
+// three states the table stores rather than restating them.
+export const syncStatusValidator = v.union(
+  v.literal("pending"),
+  v.literal("synced"),
+  v.literal("error"),
+);
 
-    // Stripe mirror
-    stripeProductId: v.optional(v.string()),
-    stripePriceId: v.optional(v.string()),
-    syncStatus: v.union(
-      v.literal("pending"),
-      v.literal("synced"),
-      v.literal("error"),
-    ),
-    syncError: v.optional(v.string()),
-  })
+// Named for the same reason as `orderValidator`: /admin's product screens
+// derive their read and write validators from it (`.pick`/`.omit`/`.extend`)
+// rather than restating fourteen fields a second time.
+export const productValidator = v.object({
+  slug: v.string(), // URL key, unique
+  name: v.string(),
+  description: v.string(), // markdown allowed
+  priceCents: v.number(), // canonical price, USD cents
+  compareAtCents: v.optional(v.number()), // for strikethrough pricing
+  imageIds: v.array(v.id("_storage")), // Convex file storage
+  stock: v.number(), // physical on-hand
+  reserved: v.number(), // held by in-flight checkouts
+  active: v.boolean(), // visible in storefront
+  sortOrder: v.number(),
+
+  // Stripe mirror
+  stripeProductId: v.optional(v.string()),
+  stripePriceId: v.optional(v.string()),
+  syncStatus: syncStatusValidator,
+  syncError: v.optional(v.string()),
+});
+
+export default defineSchema({
+  products: defineTable(productValidator.fields)
     .index("by_slug", ["slug"])
     .index("by_active", ["active", "sortOrder"]),
 
