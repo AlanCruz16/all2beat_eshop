@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { formatPriceCents, formatTimestamp } from "@/lib/format";
-import { OrderStatusBadge } from "../../OrderStatusBadge";
+import { OrderStatusBadge, type OrderStatus } from "../../OrderStatusBadge";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -14,6 +15,22 @@ function Row({ label, value }: { label: string; value: string }) {
       <span className="tabular-nums">{value}</span>
     </div>
   );
+}
+
+// An editable box seeded from a value the server owns. Convex queries are
+// live: a webhook or a second tab can change the order under the form, and
+// `useState` alone would keep showing what the field held when it mounted.
+// Re-seeding during render (rather than remounting on a `key`) is what lets the
+// "Saved." feedback survive the query update the save itself causes.
+function useServerBackedField(serverValue: string | undefined) {
+  const value = serverValue ?? "";
+  const [draft, setDraft] = useState(value);
+  const [seeded, setSeeded] = useState(value);
+  if (seeded !== value) {
+    setSeeded(value);
+    setDraft(value);
+  }
+  return [draft, setDraft] as const;
 }
 
 // The two write forms below share one shape: a field, a submit that reports
@@ -68,13 +85,13 @@ function ShipForm({
   trackingNumber,
   shippedAt,
 }: {
-  orderId: string;
-  status: "paid" | "shipped" | "refunded" | "cancelled";
+  orderId: Id<"orders">;
+  status: OrderStatus;
   trackingNumber: string | undefined;
   shippedAt: number | undefined;
 }) {
   const markShipped = useMutation(api.orders.markShipped);
-  const [tracking, setTracking] = useState(trackingNumber ?? "");
+  const [tracking, setTracking] = useServerBackedField(trackingNumber);
   const { state, submit } = useSubmit(() =>
     markShipped({ orderId, trackingNumber: tracking }),
   );
@@ -127,9 +144,15 @@ function ShipForm({
   );
 }
 
-function NoteForm({ orderId, notes }: { orderId: string; notes: string | undefined }) {
+function NoteForm({
+  orderId,
+  notes,
+}: {
+  orderId: Id<"orders">;
+  notes: string | undefined;
+}) {
   const saveNote = useMutation(api.orders.saveNote);
-  const [note, setNote] = useState(notes ?? "");
+  const [note, setNote] = useServerBackedField(notes);
   const { state, submit } = useSubmit(() => saveNote({ orderId, note }));
 
   return (

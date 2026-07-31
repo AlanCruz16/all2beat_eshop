@@ -32,6 +32,27 @@ export const shippingAddressValidator = v.object({
   country: v.string(),
 });
 
+// The stored shape of an order, named because `/admin` derives its return
+// validators from it (`.pick`/`.extend`) rather than restating eighteen fields
+// a second time.
+export const orderValidator = v.object({
+  stripeSessionId: v.string(),
+  stripePaymentIntentId: v.optional(v.string()),
+  email: v.string(),
+  // snapshot — never join back to products for historical display
+  items: v.array(orderItemValidator),
+  subtotalCents: v.number(),
+  shippingCents: v.number(),
+  taxCents: v.number(),
+  totalCents: v.number(),
+  shippingAddress: shippingAddressValidator,
+  status: orderStatusValidator,
+  trackingNumber: v.optional(v.string()),
+  notes: v.optional(v.string()),
+  paidAt: v.number(),
+  shippedAt: v.optional(v.number()),
+});
+
 export default defineSchema({
   products: defineTable({
     slug: v.string(), // URL key, unique
@@ -92,23 +113,7 @@ export default defineSchema({
     .index("by_session", ["stripeSessionId"])
     .index("by_status_expiry", ["status", "expiresAt"]),
 
-  orders: defineTable({
-    stripeSessionId: v.string(),
-    stripePaymentIntentId: v.optional(v.string()),
-    email: v.string(),
-    // snapshot — never join back to products for historical display
-    items: v.array(orderItemValidator),
-    subtotalCents: v.number(),
-    shippingCents: v.number(),
-    taxCents: v.number(),
-    totalCents: v.number(),
-    shippingAddress: shippingAddressValidator,
-    status: orderStatusValidator,
-    trackingNumber: v.optional(v.string()),
-    notes: v.optional(v.string()),
-    paidAt: v.number(),
-    shippedAt: v.optional(v.number()),
-  })
+  orders: defineTable(orderValidator.fields)
     .index("by_status", ["status"])
     .index("by_session", ["stripeSessionId"])
     // How `charge.refunded` finds the order: a refund event names the payment

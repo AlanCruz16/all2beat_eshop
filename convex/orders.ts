@@ -1,16 +1,19 @@
 import { v } from "convex/values";
 import {
+  env,
   internalMutation,
   mutation,
   query,
   type MutationCtx,
 } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { releaseHeldReservation } from "./checkout";
 import { requireAdmin } from "./authz";
+import { MAX_ORDERS_LISTED } from "../lib/orders";
 import {
   orderItemValidator,
   orderStatusValidator,
+  orderValidator,
   shippingAddressValidator,
 } from "./schema";
 
@@ -232,23 +235,14 @@ export const recordChargeRefunded = internalMutation({
 // `requireAdmin` (ticket 08): orders carry customer names, addresses, and
 // emails, so the read paths are guarded exactly as tightly as the writes.
 
-// A ~5-SKU store doing low volume will not outrun this for a long time, and a
-// bounded read keeps the list a single cheap query rather than a paginator the
-// owner has to click through. When it does start truncating, the fix is
-// `usePaginatedQuery`, not a bigger number.
-export const MAX_ORDERS_LISTED = 200;
-
-const orderSummaryValidator = v.object({
-  _id: v.id("orders"),
-  paidAt: v.number(),
-  email: v.string(),
-  totalCents: v.number(),
-  status: orderStatusValidator,
-  trackingNumber: v.optional(v.string()),
-  // Enough to recognise the order in a list; the full priced snapshot is on
-  // the detail screen.
-  items: v.array(v.object({ name: v.string(), qty: v.number() })),
-});
+const orderSummaryValidator = orderValidator
+  .pick("paidAt", "email", "totalCents", "status", "trackingNumber")
+  .extend({
+    _id: v.id("orders"),
+    // Enough to recognise the order in a list; the full priced snapshot is on
+    // the detail screen.
+    items: v.array(orderItemValidator.pick("name", "qty")),
+  });
 
 /**
  * The orders list, newest first, optionally narrowed to one status.
@@ -293,7 +287,7 @@ function stripePaymentUrl(paymentIntentId: string | undefined): string | null {
   if (paymentIntentId === undefined) {
     return null;
   }
-  const testMode = process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") ?? false;
+  const testMode = env.STRIPE_SECRET_KEY?.startsWith("sk_test_") ?? false;
   return `https://dashboard.stripe.com/${testMode ? "test/" : ""}payments/${paymentIntentId}`;
 }
 
@@ -308,26 +302,12 @@ function stripePaymentUrl(paymentIntentId: string | undefined): string | null {
 export const get = query({
   args: { orderId: v.string() },
   returns: v.union(
-    v.object({
+    orderValidator.extend({
       _id: v.id("orders"),
       _creationTime: v.number(),
-      stripeSessionId: v.string(),
-      stripePaymentIntentId: v.optional(v.string()),
       // The link out to the matching payment, built here because only the
       // server knows which Stripe mode this deployment is pointed at.
       stripePaymentUrl: v.union(v.string(), v.null()),
-      email: v.string(),
-      items: v.array(orderItemValidator),
-      subtotalCents: v.number(),
-      shippingCents: v.number(),
-      taxCents: v.number(),
-      totalCents: v.number(),
-      shippingAddress: shippingAddressValidator,
-      status: orderStatusValidator,
-      trackingNumber: v.optional(v.string()),
-      notes: v.optional(v.string()),
-      paidAt: v.number(),
-      shippedAt: v.optional(v.number()),
     }),
     v.null(),
   ),
@@ -348,16 +328,20 @@ export const get = query({
   },
 });
 
-// An empty box means "no tracking number" / "no note", not the empty string.
-function trimmedOrUndefined(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+// A submitted-but-blank box means "no tracking number" / "no note", not the
+// empty string. An *absent* argument is a different thing entirely and never
+// reaches here — see `markShipped`.
+function trimmedOrUndefined(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
-async function requireOrder(ctx: MutationCtx, orderId: string) {
+// Unlike the read paths, the mutations take a real `Id<"orders">`: their caller
+// is a screen holding an order it already loaded, not a URL segment, so a
+// malformed id here is a bug and should be rejected by argument validation.
+async function loadOrderAsAdmin(ctx: MutationCtx, orderId: Id<"orders">) {
   await requireAdmin(ctx);
-  const id = ctx.db.normalizeId("orders", orderId);
-  const order = id === null ? null : await ctx.db.get(id);
+  const order = await ctx.db.get(orderId);
   if (order === null) {
     throw new Error("No such order");
   }
@@ -373,31 +357,38 @@ async function requireOrder(ctx: MutationCtx, orderId: string) {
  * correction is not a second shipment. A refunded or cancelled order is
  * refused: shipping it would overwrite a status the Stripe Dashboard is the
  * source of truth for (story 31), silently undoing the refund in these records.
+ *
+ * Omitting `trackingNumber` leaves whatever is stored alone; passing a blank
+ * one clears it. "Optional" means the caller may not have one to give, not that
+ * not giving one erases the number a previous call recorded.
  */
 export const markShipped = mutation({
-  args: { orderId: v.string(), trackingNumber: v.optional(v.string()) },
+  args: { orderId: v.id("orders"), trackingNumber: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const order = await requireOrder(ctx, args.orderId);
+    const order = await loadOrderAsAdmin(ctx, args.orderId);
     if (order.status === "refunded" || order.status === "cancelled") {
       throw new Error(`Cannot mark a ${order.status} order shipped`);
     }
     await ctx.db.patch(order._id, {
       status: "shipped",
       shippedAt: order.shippedAt ?? Date.now(),
-      trackingNumber: trimmedOrUndefined(args.trackingNumber),
+      ...(args.trackingNumber === undefined
+        ? {}
+        : { trackingNumber: trimmedOrUndefined(args.trackingNumber) }),
     });
     return null;
   },
 });
 
 // The internal note (story 30) — one editable field on the order, never shown
-// to the customer. Saving an empty box clears it.
+// to the customer. `note` is required, not optional: saving is always the whole
+// box, and an empty box clears the note.
 export const saveNote = mutation({
-  args: { orderId: v.string(), note: v.string() },
+  args: { orderId: v.id("orders"), note: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const order = await requireOrder(ctx, args.orderId);
+    const order = await loadOrderAsAdmin(ctx, args.orderId);
     await ctx.db.patch(order._id, { notes: trimmedOrUndefined(args.note) });
     return null;
   },

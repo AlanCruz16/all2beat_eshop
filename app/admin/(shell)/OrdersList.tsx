@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { MAX_ORDERS_LISTED } from "@/lib/orders";
 import { formatPriceCents, formatTimestamp } from "@/lib/format";
 import { OrderStatusBadge, type OrderStatus } from "./OrderStatusBadge";
 
@@ -90,6 +91,14 @@ export function OrdersList() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* A truncated list must say so — otherwise "my oldest order is gone"
+          looks like data loss rather than a cap. */}
+      {orders !== undefined && orders.length === MAX_ORDERS_LISTED && (
+        <p className="text-sm text-zinc-500">
+          Showing the {MAX_ORDERS_LISTED} most recent orders.
+        </p>
       )}
     </section>
   );

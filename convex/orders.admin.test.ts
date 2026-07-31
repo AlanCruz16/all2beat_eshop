@@ -319,12 +319,24 @@ describe("markShipped", () => {
     ).rejects.toThrow(/cancelled/i);
   });
 
-  test("rejects an order that doesn't exist", async () => {
+  test("leaves a stored tracking number alone when none is passed", async () => {
     const t = convexTest(schema, modules);
-    await seedOrders(t, [{}]);
+    const [orderId] = await seedOrders(t, [
+      { status: "shipped", trackingNumber: "1Z999" },
+    ]);
+
+    await asAdmin(t).mutation(api.orders.markShipped, { orderId });
+
+    expect((await readOrder(t, orderId))?.trackingNumber).toBe("1Z999");
+  });
+
+  test("rejects an order that no longer exists", async () => {
+    const t = convexTest(schema, modules);
+    const [orderId] = await seedOrders(t, [{}]);
+    await t.run(async (ctx) => await ctx.db.delete(orderId));
 
     await expect(
-      asAdmin(t).mutation(api.orders.markShipped, { orderId: "nope" }),
+      asAdmin(t).mutation(api.orders.markShipped, { orderId }),
     ).rejects.toThrow(/no such order/i);
   });
 });
