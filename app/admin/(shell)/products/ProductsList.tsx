@@ -6,7 +6,9 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { formatPriceCents } from "@/lib/format";
+import { MAX_PRODUCTS_LISTED } from "@/lib/products";
 import { SubmitFeedback, useSubmit } from "../adminForm";
+import { Badge } from "../Badge";
 import { SyncStatusBadge } from "./SyncStatusBadge";
 
 type ProductRow = FunctionReturnType<typeof api.products.listForAdmin>[number];
@@ -43,28 +45,32 @@ function UnsellableWarning({ products }: { products: ProductRow[] }) {
   );
 }
 
-// Stock as the owner needs to read it: what is actually sellable, and — only
-// when they differ — how many units a checkout in flight is holding back.
+// Stock as the owner needs to read it: what is on the shelf, what of that is
+// still sellable, and — only when they differ — how much a checkout in flight
+// is holding back. The highlight rides `availability`, the same judgement the
+// storefront's own badge makes about the same product.
+const AVAILABILITY_CLASS: Record<ProductRow["availability"], string> = {
+  "sold-out": "font-medium text-red-700 dark:text-red-400",
+  "low-stock": "font-medium text-amber-700 dark:text-amber-400",
+  "in-stock": "",
+};
+
 function StockCell({ product }: { product: ProductRow }) {
-  const held = product.stock - product.available;
   return (
     <div className="space-y-1">
+      <span className="block tabular-nums">{product.stock} in stock</span>
       <span
-        className={`tabular-nums ${
-          product.available === 0
-            ? "font-medium text-red-700 dark:text-red-400"
-            : product.lowStock
-              ? "font-medium text-amber-700 dark:text-amber-400"
-              : ""
-        }`}
+        className={`block text-xs tabular-nums ${AVAILABILITY_CLASS[product.availability]}`}
       >
-        {product.available === 0
-          ? "Out of stock"
-          : `${product.available} available`}
+        {product.availability === "sold-out"
+          ? "None available to sell"
+          : `${product.available} available${
+              product.availability === "low-stock" ? " — running low" : ""
+            }`}
       </span>
-      {held > 0 && (
+      {product.reserved > 0 && (
         <span className="block text-xs text-zinc-500">
-          {held} held by checkouts in flight
+          {product.reserved} held by checkouts in flight
         </span>
       )}
     </div>
@@ -113,7 +119,8 @@ export function ProductsList() {
 
       {products.length === 0 ? (
         <p className="text-sm text-zinc-500">
-          No products yet. Seed the catalog with <code>npm run seed</code>.
+          No products yet — the catalog is seeded from the deployment for now,
+          so ask your developer to add the first ones.
         </p>
       ) : (
         <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -158,15 +165,9 @@ export function ProductsList() {
               </div>
 
               <div className="flex flex-wrap items-start gap-2">
-                <span
-                  className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${
-                    product.active
-                      ? "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
-                      : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                  }`}
-                >
+                <Badge tone={product.active ? "good" : "neutral"}>
                   {product.active ? "Active" : "Inactive"}
-                </span>
+                </Badge>
                 <SyncStatusBadge status={product.syncStatus} />
               </div>
 
@@ -174,6 +175,14 @@ export function ProductsList() {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* The read is bounded; a screen that quietly showed only part of the
+          catalog would read as "that's all of it". */}
+      {products.length === MAX_PRODUCTS_LISTED && (
+        <p className="text-sm text-zinc-500">
+          Showing the first {MAX_PRODUCTS_LISTED} products.
+        </p>
       )}
     </section>
   );

@@ -10,7 +10,7 @@
 export const PRODUCT_SLUG_PATTERN = "[a-z0-9]+(?:-[a-z0-9]+)*";
 
 // The /admin list is a single bounded read rather than a paginator: the catalog
-// is ~5 SKUs and the owner wants the whole thing on one screen. The bound is
+// is a handful of products and the owner wants the whole thing on one screen. The bound is
 // here so a runaway table can't turn this into an unbounded query — the same
 // reasoning as `MAX_ORDERS_LISTED`.
 export const MAX_PRODUCTS_LISTED = 200;

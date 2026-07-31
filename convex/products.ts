@@ -1,4 +1,4 @@
-import { v, type Infer } from "convex/values";
+import { ConvexError, v, type Infer } from "convex/values";
 import {
   internalAction,
   internalMutation,
@@ -41,17 +41,28 @@ const productSummaryValidator = v.object({
   availability: availabilityValidator,
 });
 
+// Available stock, and how to talk about it (CONTEXT.md "Available stock").
+// One pair of helpers rather than one per screen: the storefront's "Only a few
+// left" and /admin's low-stock highlight are the same judgement about the same
+// number, and they must not be able to disagree.
+export function availableStock(product: Doc<"products">): number {
+  return Math.max(0, product.stock - product.reserved);
+}
+
+export function availabilityOf(available: number): Availability {
+  return available === 0
+    ? "sold-out"
+    : available < LOW_STOCK_THRESHOLD
+      ? "low-stock"
+      : "in-stock";
+}
+
 async function toProductSummary(ctx: QueryCtx, product: Doc<"products">) {
   const imageUrls = (
     await Promise.all(product.imageIds.map((id) => ctx.storage.getUrl(id)))
   ).filter((url): url is string => url !== null);
-  const available = Math.max(0, product.stock - product.reserved);
-  const availability =
-    available === 0
-      ? "sold-out"
-      : available < LOW_STOCK_THRESHOLD
-        ? "low-stock"
-        : "in-stock";
+  const available = availableStock(product);
+  const availability = availabilityOf(available);
 
   return {
     _id: product._id,
@@ -259,7 +270,6 @@ const adminProductSummaryValidator = productValidator
     "stock",
     "reserved",
     "active",
-    "sortOrder",
     "syncStatus",
     "syncError",
   )
@@ -268,7 +278,10 @@ const adminProductSummaryValidator = productValidator
     // One thumbnail is all a row shows; the rest are the edit form's business.
     imageUrl: v.union(v.string(), v.null()),
     available: v.number(),
-    lowStock: v.boolean(),
+    // The same word the storefront uses for the same product — the low-stock
+    // highlight this screen wants is `"low-stock"`, not a second opinion about
+    // when a product is running out.
+    availability: availabilityValidator,
   });
 
 /**
@@ -284,14 +297,15 @@ export const listForAdmin = query({
   returns: v.array(adminProductSummaryValidator),
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    // The whole catalog is ~5 SKUs; `by_active` only orders within one active
-    // state, so the sort is done here rather than half-done by an index.
+    // The whole catalog is a handful of products; `by_active` only orders
+    // within one active state, so the sort is done here rather than half-done
+    // by an index.
     const products = await ctx.db.query("products").take(MAX_PRODUCTS_LISTED);
     products.sort((a, b) => a.sortOrder - b.sortOrder);
 
     return await Promise.all(
       products.map(async (product) => {
-        const available = Math.max(0, product.stock - product.reserved);
+        const available = availableStock(product);
         return {
           _id: product._id,
           slug: product.slug,
@@ -302,16 +316,16 @@ export const listForAdmin = query({
             product.imageIds[0] === undefined
               ? null
               : await ctx.storage.getUrl(product.imageIds[0]),
+          // Both counts, because the owner reads them for different things:
+          // `stock` is what is on the shelf to be counted against, `available`
+          // is what can still be sold. The low-stock highlight is off the
+          // latter — a reorder decision made on the raw number is made partly
+          // on units nobody can buy.
           stock: product.stock,
           reserved: product.reserved,
           available,
-          // Off *available* stock, not raw stock: units an in-flight checkout
-          // is holding are not on the shelf, and a reorder decision made on the
-          // raw number is made on units nobody can buy. Zero is not "low" — it
-          // is out, which the screen says in its own words.
-          lowStock: available > 0 && available < LOW_STOCK_THRESHOLD,
+          availability: availabilityOf(available),
           active: product.active,
-          sortOrder: product.sortOrder,
           syncStatus: product.syncStatus,
           syncError: product.syncError,
         };
@@ -364,7 +378,7 @@ export const getForAdmin = query({
     const { imageIds, ...fields } = product;
     return {
       ...fields,
-      available: Math.max(0, product.stock - product.reserved),
+      available: availableStock(product),
       images: await Promise.all(
         imageIds.map(async (storageId) => ({
           storageId,
@@ -391,15 +405,19 @@ const SLUG_REGEX = new RegExp(`^${PRODUCT_SLUG_PATTERN}$`);
 
 // Validation lives in the mutation, not in the form: the form is a convenience,
 // and a mutation reachable over the network is where the catalog's invariants
-// actually have to hold. Messages are written to be read by the owner, since
-// the form shows them verbatim.
-function requireCount(label: string, value: number, minimum: number): number {
+// actually have to hold.
+//
+// `ConvexError`, not `Error`, for every one of them: Convex redacts a plain
+// thrown message to "Server Error" in production, and these are written to be
+// read by the store owner — the form shows them verbatim.
+function reject(message: string): never {
+  throw new ConvexError(message);
+}
+
+function requireCount(label: string, value: number, minimum: number): void {
   if (!Number.isInteger(value) || value < minimum) {
-    throw new Error(
-      `${label} must be a whole number of at least ${minimum} (got ${value})`,
-    );
+    reject(`${label} must be a whole number of at least ${minimum} (got ${value})`);
   }
-  return value;
 }
 
 const saveArgs = productValidator
@@ -436,12 +454,12 @@ export const save = mutation({
     await requireAdmin(ctx);
     const product = await ctx.db.get(args.productId);
     if (product === null) {
-      throw new Error("No such product");
+      reject("No such product");
     }
 
     const slug = args.slug.trim();
     if (!SLUG_REGEX.test(slug)) {
-      throw new Error(
+      reject(
         `The slug "${slug}" isn't a URL key — use lowercase letters, numbers, and single hyphens (e.g. "cacao-crunch")`,
       );
     }
@@ -450,12 +468,12 @@ export const save = mutation({
       .withIndex("by_slug", (q) => q.eq("slug", slug))
       .unique();
     if (clash !== null && clash._id !== product._id) {
-      throw new Error(`Another product already uses the slug "${slug}"`);
+      reject(`Another product already uses the slug "${slug}"`);
     }
 
     const name = args.name.trim();
     if (name === "") {
-      throw new Error("Name can't be empty");
+      reject("Name can't be empty");
     }
 
     // A zero-cent bar is a giveaway, not a price — far likelier a half-typed
@@ -464,17 +482,17 @@ export const save = mutation({
     if (args.compareAtCents !== undefined) {
       requireCount("Compare-at price", args.compareAtCents, 1);
       if (args.compareAtCents <= args.priceCents) {
-        throw new Error(
+        reject(
           "Compare-at price must be higher than the price — it is what the strikethrough is struck through",
         );
       }
     }
     requireCount("Stock", args.stock, 0);
     if (!Number.isInteger(args.sortOrder)) {
-      throw new Error(`Sort order must be a whole number (got ${args.sortOrder})`);
+      reject(`Sort order must be a whole number (got ${args.sortOrder})`);
     }
     if (args.imageIds.length > MAX_PRODUCT_IMAGES) {
-      throw new Error(`A product can hold at most ${MAX_PRODUCT_IMAGES} images`);
+      reject(`A product can hold at most ${MAX_PRODUCT_IMAGES} images`);
     }
 
     const fields = {
@@ -512,7 +530,7 @@ export const setActive = mutation({
     await requireAdmin(ctx);
     const product = await ctx.db.get(args.productId);
     if (product === null) {
-      throw new Error("No such product");
+      reject("No such product");
     }
     if (product.active === args.active) {
       return null;
@@ -538,7 +556,7 @@ export const retrySync = mutation({
     await requireAdmin(ctx);
     const product = await ctx.db.get(args.productId);
     if (product === null) {
-      throw new Error("No such product");
+      reject("No such product");
     }
     await markPendingAndScheduleSync(ctx, product._id);
     return null;

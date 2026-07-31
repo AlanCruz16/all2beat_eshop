@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ConvexError } from "convex/values";
 
 // The three pieces every /admin write form is built from, factored out of the
 // Orders screen when the Products screen (ticket 10) needed the same three.
@@ -58,16 +59,15 @@ export function useSubmit(run: () => Promise<unknown>) {
   return { state, submit };
 }
 
-// Convex wraps a mutation's thrown message in its own framing
-// ("[CONVEX M(products:save)] ... Uncaught Error: Stock must be …"). The
-// validation messages are written to be read by the store owner, so the last
-// `Error:` segment is what the form shows.
+// A `ConvexError`'s payload is the one part of a failed mutation Convex will
+// carry to the browser in production — everything else is redacted to "Server
+// Error". The admin mutations throw their owner-readable messages that way
+// (`reject` in `convex/products.ts`), so a string payload is a message meant to
+// be shown; anything else is a fault, which belongs in the console.
 function errorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return "Something went wrong";
-  }
-  const message = error.message.split("Uncaught Error:").pop() ?? error.message;
-  return message.split("\n")[0]?.trim() || "Something went wrong";
+  const data: unknown =
+    error instanceof ConvexError ? (error.data as unknown) : undefined;
+  return typeof data === "string" ? data : "Something went wrong";
 }
 
 /**

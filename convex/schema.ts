@@ -53,10 +53,10 @@ export const orderValidator = v.object({
   shippedAt: v.optional(v.number()),
 });
 
-// A product's mirror state in Stripe (CONTEXT.md "Sync status"). Exported for
-// the same reason as the order status above: /admin's row validator names the
-// three states the table stores rather than restating them.
-export const syncStatusValidator = v.union(
+// A product's mirror state in Stripe (CONTEXT.md "Sync status"). Named rather
+// than inlined so `productValidator` below reads as three states with a name,
+// not an anonymous union; callers reach it through `productValidator` itself.
+const syncStatusValidator = v.union(
   v.literal("pending"),
   v.literal("synced"),
   v.literal("error"),

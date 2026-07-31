@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
+import { ConvexError } from "convex/values";
 import { describe, expect, test } from "vitest";
 import schema from "./schema";
 import { api } from "./_generated/api";
@@ -182,13 +183,13 @@ describe("listForAdmin", () => {
       active: false,
       syncStatus: "error",
       syncError: "No such price: price_gone",
-      lowStock: false,
+      availability: "in-stock",
     });
   });
 
   // Available stock, not raw stock: units already held by an in-flight checkout
   // are not on the shelf, and a reorder decision made on the raw number is made
-  // on a number nobody can buy against.
+  // partly on units nobody can buy.
   test("flags low stock off what is actually available", async () => {
     const t = convexTest(schema, modules);
     await insertProduct(t, {
@@ -198,7 +199,22 @@ describe("listForAdmin", () => {
 
     const [row] = await asAdmin(t).query(api.products.listForAdmin, {});
 
-    expect(row).toMatchObject({ available: LOW_STOCK_THRESHOLD - 1, lowStock: true });
+    expect(row).toMatchObject({
+      stock: LOW_STOCK_THRESHOLD + 2,
+      available: LOW_STOCK_THRESHOLD - 1,
+      availability: "low-stock",
+    });
+  });
+
+  // The same word the storefront uses, so the owner and the shopper are never
+  // looking at two different opinions of the same shelf.
+  test("reports a product with nothing available as sold out", async () => {
+    const t = convexTest(schema, modules);
+    await insertProduct(t, { stock: 2, reserved: 2 });
+
+    const [row] = await asAdmin(t).query(api.products.listForAdmin, {});
+
+    expect(row).toMatchObject({ available: 0, availability: "sold-out" });
   });
 });
 
@@ -353,6 +369,22 @@ describe("save", () => {
     await expect(
       asAdmin(t).mutation(api.products.save, savePayload(productId, overrides)),
     ).rejects.toThrow();
+  });
+
+  // Convex redacts a plain thrown message to "Server Error" in production. The
+  // rejection messages here are written for the store owner and shown verbatim
+  // by the form, so they have to travel as `ConvexError` data or they arrive as
+  // nothing at all on the deployed site.
+  test("rejects with a message the form can show the owner", async () => {
+    const t = convexTest(schema, modules);
+    const productId = await insertProduct(t);
+
+    const failure = await asAdmin(t)
+      .mutation(api.products.save, savePayload(productId, { stock: -1 }))
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ConvexError);
+    expect((failure as ConvexError<string>).data).toMatch(/Stock must be/);
   });
 });
 

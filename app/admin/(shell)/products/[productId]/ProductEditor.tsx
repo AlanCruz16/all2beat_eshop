@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
+import { ConvexError } from "convex/values";
 import type { Id } from "@/convex/_generated/dataModel";
 import { amountInputToCents, centsToAmountInput } from "@/lib/format";
 import { MAX_PRODUCT_IMAGES, PRODUCT_SLUG_PATTERN } from "@/lib/products";
@@ -130,10 +131,17 @@ function SyncPanel({ product }: { product: AdminProduct }) {
       ) : (
         <p className="text-zinc-500">
           {product.syncStatus === "pending"
-            ? "A sync is queued — saving an edit always re-mirrors this product to Stripe."
+            ? "A sync is queued — this product can't be sold until it finishes."
             : "This product is mirrored to Stripe and can be sold."}
         </p>
       )}
+      {/* Which edits re-mirror, said plainly, because a save that doesn't
+          touch one of them deliberately leaves Stripe alone. */}
+      <p className="text-xs text-zinc-500">
+        Editing the name, description, price, slug, or active flag re-syncs this
+        product. Stock, images, compare-at price, and sort order are ours alone
+        — Stripe never sees them.
+      </p>
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -291,16 +299,16 @@ function EditForm({ product }: { product: AdminProduct }) {
   const { state, submit } = useSubmit(async () => {
     const priceCents = amountInputToCents(draft.price);
     if (priceCents === null) {
-      throw new Error("Price must be an amount, like 4.99");
+      throw new ConvexError("Price must be an amount, like 4.99");
     }
     const compareAtCents = amountInputToCents(draft.compareAt);
     if (compareAtCents === null && draft.compareAt.trim() !== "") {
-      throw new Error("Compare-at price must be an amount, like 6.99");
+      throw new ConvexError("Compare-at price must be an amount, like 6.99");
     }
     const stock = Number(draft.stock);
     const sortOrder = Number(draft.sortOrder);
     if (!Number.isFinite(stock) || !Number.isFinite(sortOrder)) {
-      throw new Error("Stock and sort order must be numbers");
+      throw new ConvexError("Stock and sort order must be numbers");
     }
 
     await save({
@@ -440,7 +448,10 @@ function EditForm({ product }: { product: AdminProduct }) {
         >
           Save product
         </button>
-        <SubmitFeedback state={state} savedLabel="Saved — re-syncing Stripe." />
+        {/* Just "Saved." — whether this particular save re-mirrored to Stripe
+            is the sync panel's to report, and claiming it here would be a lie
+            on every stock correction. */}
+        <SubmitFeedback state={state} savedLabel="Saved." />
       </div>
     </form>
   );
