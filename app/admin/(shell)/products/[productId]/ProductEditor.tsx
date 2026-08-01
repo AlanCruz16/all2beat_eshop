@@ -10,7 +10,14 @@ import { ConvexError } from "convex/values";
 import type { Id } from "@/convex/_generated/dataModel";
 import { amountInputToCents, centsToAmountInput } from "@/lib/format";
 import { MAX_PRODUCT_IMAGES, PRODUCT_SLUG_PATTERN } from "@/lib/products";
-import { SubmitFeedback, useServerBackedState, useSubmit } from "../../adminForm";
+import {
+  Field,
+  INPUT_CLASS,
+  signatureOf as signatureFrom,
+  SubmitFeedback,
+  useServerBackedState,
+  useSubmit,
+} from "../../adminForm";
 import { SyncStatusBadge } from "../SyncStatusBadge";
 
 type AdminProduct = NonNullable<
@@ -60,7 +67,7 @@ function draftFrom(product: AdminProduct): Draft {
 // after every save, and reseeding the form on that would throw away whatever
 // the owner had started typing next.
 function signatureOf(product: AdminProduct): string {
-  return JSON.stringify([
+  return signatureFrom(
     product.name,
     product.slug,
     product.description,
@@ -70,29 +77,8 @@ function signatureOf(product: AdminProduct): string {
     product.sortOrder,
     product.active,
     product.images.map((image) => image.storageId),
-  ]);
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block space-y-1 text-sm">
-      <span className="text-zinc-500">{label}</span>
-      {children}
-      {hint !== undefined && <span className="block text-xs text-zinc-500">{hint}</span>}
-    </label>
   );
 }
-
-const INPUT_CLASS =
-  "w-full rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
 
 // The mirror's own status, and the only way out of `error` short of a fake
 // edit. A failed product is unsellable, so this says that in full rather than

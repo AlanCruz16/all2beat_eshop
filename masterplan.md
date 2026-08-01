@@ -301,7 +301,7 @@ Deliberately small. Clerk-gated, three screens.
 
 **All resolved via grilling session, 2026-07-24.** Kept here for history; each item now states its resolution.
 
-1. ~~**Sales tax.**~~ **Resolved:** build the `settings.taxEnabled` flag (§4), **default `false`** — tax absorbed into price. Toggling to Stripe Tax later still requires registering the Arizona nexus/origin address in the Stripe Dashboard first; that step is a pre-launch action item, not a code change.
+1. ~~**Sales tax.**~~ **Resolved:** build the `settings.taxEnabled` flag (§4), **default `false`** — tax absorbed into price. Toggling to Stripe Tax later still requires registering the Arizona nexus/origin address in the Stripe Dashboard first; that step is a pre-launch action item, not a code change. The Dashboard steps are written up in `.scratch/storefront-rebuild/issues/11-admin-settings.md` ("Turning the tax toggle on"), including the part this line understates: "absorbed into price" is *tax-inclusive*, so switching the account default to exclusive would be a price increase, not a config detail.
 2. ~~**Flat shipping rate amount.**~~ **Resolved:** **$5.00 placeholder** (`settings.shippingFlatRateCents`) until the client supplies the real figure.
 3. ~~**Ship-to countries.**~~ **Resolved:** **US-only**, locked in.
 4. ~~**Real product data.**~~ **Resolved:** sourced first-hand from the client directly — no scraping of the old site. See ADR-0002.
@@ -391,7 +391,7 @@ Also strip: the old site leaks WordPress plugin paths and a WooCommerce placehol
 - [ ] Products re-synced in live mode (test-mode Stripe products do **not** carry over)
 - [ ] `settings` table populated with real values in prod Convex — real shipping rate (§8.2 placeholder replaced), confirmed free-shipping threshold, tax flag set per client/accountant decision (ADR-0004 — no Stripe shipping_rate objects to recreate, these are just table values)
 - [ ] Stripe email receipts enabled in Dashboard settings
-- [ ] Stripe Tax configured (or explicitly declined in writing) if `settings.taxEnabled` is turned on
+- [ ] Stripe Tax configured (or explicitly declined in writing) if `settings.taxEnabled` is turned on — steps, and the inclusive-vs-exclusive decision they hinge on, in `.scratch/storefront-rebuild/issues/11-admin-settings.md` ("Turning the tax toggle on"). Do it in test mode first; flip the `/admin` toggle **last**
 - [ ] Convex production deployment, not dev
 - [ ] Vercel on **Pro** (commercial use requirement)
 - [ ] Custom domain + SSL on Vercel; DNS cut over from the old host
