@@ -36,3 +36,26 @@ export function isAdminClaims(
 ): boolean {
   return claims?.publicMetadata?.role === ADMIN_ROLE;
 }
+
+// The sign-in page lives under `/admin` so the store owner has a single URL to
+// remember, which makes it the one path in that subtree the redirect must let
+// through — gating it would loop it against itself.
+const SIGN_IN_PATH = "/admin/sign-in";
+
+/**
+ * Whether `proxy.ts` should send a non-admin somewhere else before this path
+ * renders.
+ *
+ * A plain pathname comparison, not a route pattern: Clerk deprecated
+ * `createRouteMatcher` because a pattern can quietly disagree with how Next
+ * routes a request, and this is a redirect for the owner's convenience, not the
+ * authorization — that is the admin layout's and `requireAdmin`'s, both of
+ * which re-derive identity from the request itself. Exported so the matching
+ * can be tested directly; the middleware it serves cannot be.
+ */
+export function isGatedAdminPath(pathname: string): boolean {
+  const underAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isSignIn =
+    pathname === SIGN_IN_PATH || pathname.startsWith(`${SIGN_IN_PATH}/`);
+  return underAdmin && !isSignIn;
+}

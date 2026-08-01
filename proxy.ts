@@ -1,20 +1,27 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { isAdminClaims } from "./lib/admin-role";
+import { isAdminClaims, isGatedAdminPath } from "./lib/admin-role";
 
 // Next 16 renamed the `middleware.ts` convention to `proxy.ts`; this is still
 // Clerk's `clerkMiddleware`, only the filename changed.
 //
 // `/admin` is the only authenticated surface on the site. Everything else —
 // catalog, cart, checkout — is guest-only by design (CONTEXT.md "Guest
-// checkout"), so it is never gated here.
-const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
-// ...except the sign-in page itself, which lives under /admin so the store
-// owner has a single URL to remember. Gating it would loop it against itself.
-const isSignInRoute = createRouteMatcher(["/admin/sign-in(.*)"]);
-
+// checkout"), so it is never gated here. The sign-in page itself is the one
+// exception under `/admin`: it lives there so the store owner has a single URL
+// to remember, and gating it would loop it against itself.
+//
+// Which paths that covers is `isGatedAdminPath` in `lib/admin-role.ts`, beside
+// the role check it pairs with — matched on the pathname directly rather than
+// with Clerk's `createRouteMatcher`, which they deprecated in favour of
+// checking auth in the resource itself. This middleware is not that check: it
+// is the redirect that gets the owner to a sign-in box. The authorization
+// proper is `app/admin/(shell)/layout.tsx`, which re-derives identity and 404s,
+// and `requireAdmin` inside every Convex function, which a request made
+// straight to Convex has to pass and this file never sees (masterplan §7:
+// enforced in both).
 export default clerkMiddleware(async (auth, req) => {
-  if (!isAdminRoute(req) || isSignInRoute(req)) {
+  if (!isGatedAdminPath(req.nextUrl.pathname)) {
     return NextResponse.next();
   }
 
