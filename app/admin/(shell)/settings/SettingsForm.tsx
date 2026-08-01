@@ -5,7 +5,14 @@ import type { FunctionReturnType } from "convex/server";
 import { ConvexError } from "convex/values";
 import { api } from "@/convex/_generated/api";
 import { amountInputToCents, centsToAmountInput, formatPriceCents } from "@/lib/format";
-import { SubmitFeedback, useServerBackedState, useSubmit } from "../adminForm";
+import {
+  Field,
+  INPUT_CLASS,
+  signatureOf as signatureFrom,
+  SubmitFeedback,
+  useServerBackedState,
+  useSubmit,
+} from "../adminForm";
 
 type Settings = NonNullable<FunctionReturnType<typeof api.settings.get>>;
 
@@ -47,40 +54,17 @@ function draftFrom(settings: Settings | null): Draft {
 // Convex queries are live, and a second tab saving must not leave this form
 // showing what it held when it mounted.
 function signatureOf(settings: Settings | null): string {
-  return JSON.stringify(
-    settings === null
-      ? null
-      : [
-          settings.taxEnabled,
-          settings.shippingFlatRateCents,
-          settings.freeShippingThresholdCents,
-          settings.contactEmail,
-        ],
-  );
+  // The unseeded case is its own signature, so the first save — which inserts
+  // the row — reseeds the form from what the server now holds.
+  return settings === null
+    ? signatureFrom(null)
+    : signatureFrom(
+        settings.taxEnabled,
+        settings.shippingFlatRateCents,
+        settings.freeShippingThresholdCents,
+        settings.contactEmail,
+      );
 }
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block space-y-1 text-sm">
-      <span className="text-zinc-500">{label}</span>
-      {children}
-      {hint !== undefined && (
-        <span className="block text-xs text-zinc-500">{hint}</span>
-      )}
-    </label>
-  );
-}
-
-const INPUT_CLASS =
-  "w-full rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
 
 // The shipping rule the two amounts add up to, said back in one sentence,
 // because the pair is easy to set into a combination nobody meant — a threshold

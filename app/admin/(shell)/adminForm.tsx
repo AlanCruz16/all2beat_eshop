@@ -3,8 +3,42 @@
 import { useState } from "react";
 import { ConvexError } from "convex/values";
 
-// The three pieces every /admin write form is built from, factored out of the
-// Orders screen when the Products screen (ticket 10) needed the same three.
+// The pieces every /admin write form is built from, factored out of the Orders
+// screen when the Products screen (ticket 10) needed the same ones — and added
+// to when the Settings screen (ticket 11) needed the labelled field and the
+// input styling a second time.
+
+export const INPUT_CLASS =
+  "w-full rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900";
+
+/**
+ * A labelled box, with the sentence explaining it kept under the box rather
+ * than in a tooltip — /admin has one reader and no room for hover-to-discover.
+ *
+ * The input is passed in rather than described, because these forms hold text
+ * areas, number boxes, and selects, and a `type` prop would only grow.
+ * `INPUT_CLASS` is exported for the caller to spread onto whatever it passes.
+ */
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block space-y-1 text-sm">
+      <span className="text-zinc-500">{label}</span>
+      {children}
+      {hint !== undefined && (
+        <span className="block text-xs text-zinc-500">{hint}</span>
+      )}
+    </label>
+  );
+}
+
 
 /**
  * An editable value seeded from one the server owns.
@@ -27,6 +61,17 @@ export function useServerBackedState<T>(value: T, signature: string) {
     setDraft(value);
   }
   return [draft, setDraft] as const;
+}
+
+/**
+ * The `signature` above, built from the server values a form is seeded from.
+ *
+ * Lives here rather than in each screen because it is `useServerBackedState`'s
+ * own concept: what counts as "the record changed" is the list of values passed
+ * in, and every caller was otherwise hand-rolling the same `JSON.stringify`.
+ */
+export function signatureOf(...values: unknown[]): string {
+  return JSON.stringify(values);
 }
 
 /**

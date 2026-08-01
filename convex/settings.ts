@@ -1,6 +1,7 @@
-import { ConvexError, v, type Infer } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
+import { reject, requireCount } from "./adminInput";
 import { settingsValidator } from "./schema";
 
 export const DEFAULT_SETTINGS: Infer<typeof settingsValidator> = {
@@ -38,24 +39,6 @@ export const seedDefaults = internalMutation({
 // the cart counts up to the free-shipping threshold) and the fourth is a
 // boolean about tax. The write is another matter entirely.
 
-// `ConvexError`, not `Error`: Convex redacts a plain thrown message to "Server
-// Error" in production, and these are written to be read by the store owner —
-// the form shows them verbatim (same reasoning as `reject` in `products.ts`).
-function reject(message: string): never {
-  throw new ConvexError(message);
-}
-
-// Zero is allowed on both amounts and means something: a flat rate of zero is
-// free shipping on every order, and a threshold of zero is what
-// `shippingOptionFor` already reads as "always free".
-function requireCents(label: string, value: number): void {
-  if (!Number.isInteger(value) || value < 0) {
-    reject(
-      `${label} must be a whole number of cents, zero or more (got ${value})`,
-    );
-  }
-}
-
 // Deliberately loose — the point is to catch a half-typed address or a stray
 // sentence, not to adjudicate RFC 5322. This value is printed on the contact
 // page, so an obviously-broken one is worth refusing at the form.
@@ -84,8 +67,11 @@ export const save = mutation({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    requireCents("Shipping rate", args.shippingFlatRateCents);
-    requireCents("Free-shipping threshold", args.freeShippingThresholdCents);
+    // Zero is allowed on both and means something: a flat rate of zero is free
+    // shipping on every order, and a threshold of zero is what
+    // `shippingOptionFor` already reads as "always free".
+    requireCount("Shipping rate", args.shippingFlatRateCents, 0);
+    requireCount("Free-shipping threshold", args.freeShippingThresholdCents, 0);
 
     const contactEmail = args.contactEmail.trim();
     if (!EMAIL_REGEX.test(contactEmail)) {

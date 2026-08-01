@@ -1,4 +1,4 @@
-import { ConvexError, v, type Infer } from "convex/values";
+import { v, type Infer } from "convex/values";
 import {
   internalAction,
   internalMutation,
@@ -11,6 +11,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authz";
+import { reject, requireCount } from "./adminInput";
 import {
   MAX_PRODUCT_IMAGES,
   MAX_PRODUCTS_LISTED,
@@ -405,20 +406,8 @@ const SLUG_REGEX = new RegExp(`^${PRODUCT_SLUG_PATTERN}$`);
 
 // Validation lives in the mutation, not in the form: the form is a convenience,
 // and a mutation reachable over the network is where the catalog's invariants
-// actually have to hold.
-//
-// `ConvexError`, not `Error`, for every one of them: Convex redacts a plain
-// thrown message to "Server Error" in production, and these are written to be
-// read by the store owner — the form shows them verbatim.
-function reject(message: string): never {
-  throw new ConvexError(message);
-}
-
-function requireCount(label: string, value: number, minimum: number): void {
-  if (!Number.isInteger(value) || value < minimum) {
-    reject(`${label} must be a whole number of at least ${minimum} (got ${value})`);
-  }
-}
+// actually have to hold. `reject`/`requireCount` are shared with the Settings
+// screen — see `adminInput.ts` for why they throw the way they do.
 
 const saveArgs = productValidator
   .pick(

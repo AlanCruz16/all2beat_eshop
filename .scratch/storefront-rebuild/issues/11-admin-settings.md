@@ -24,3 +24,13 @@ Implemented 2026-08-01.
 - **The live-effect claim is tested, not asserted**: `convex/settings.admin.test.ts` saves new values and then calls `checkout.reserveCart`, expecting the quote's `settings` block to carry them. That is the ADR-0004 promise in one test.
 - **Nothing here touches Stripe.** The amounts reach it as per-session `shipping_rate_data` and the flag as `automatic_tax.enabled`, both built from this row at request time — which is exactly why no redeploy or Dashboard trip is involved.
 - **Turning the tax toggle on still needs Stripe Tax configured** in the Stripe Dashboard (origin address, registrations). The toggle is ours; the tax engine behind it is not, and the checkbox says so.
+
+Code review (two-axis) found no spec gaps and no documented-standard breaches. What it did find was duplication, now folded away:
+
+- `Field` and `INPUT_CLASS` moved into `app/admin/(shell)/adminForm.tsx` — the file that exists to hold exactly this, and Settings was the second screen to need them. `signatureOf` moved there too, beside the `useServerBackedState` hook whose concept it is.
+- `reject` and `requireCount` moved into `convex/adminInput.ts`, shared by Products and Settings. The three lines were never the point; the reasoning above them (why a `ConvexError` and not an `Error`) is what shouldn't be re-derived per screen.
+
+Two findings were checked and rejected:
+
+- **"The contact page needs a redeploy to show a new email."** It doesn't — `/contact` isn't in the prerender manifest and Next builds it as `ƒ` (server-rendered on demand), so `fetchQuery(api.settings.get)` re-reads the row each request. Verified against `.next/prerender-manifest.json`, not inferred.
+- **"`ShippingSummary` restates the threshold-≤-0 rule that `lib/checkout.ts` owns."** True, and left alone: that rule already lives in `shippingOptionFor`, `freeShippingProgress`, and `FreeShippingProgress`, so unifying it is a change to the checkout math seam and its tests — not this ticket's business.
