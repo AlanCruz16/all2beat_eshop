@@ -84,6 +84,17 @@ export const productValidator = v.object({
   syncError: v.optional(v.string()),
 });
 
+// The four store-wide values the Admin owns (CONTEXT.md "Settings"), named for
+// the same reason `productValidator` is: /admin's Settings form derives its
+// write validator from it rather than restating the four a second time — and
+// "only these four" (ticket 11) then holds by construction.
+export const settingsValidator = v.object({
+  taxEnabled: v.boolean(), // default false, see masterplan §8.1
+  shippingFlatRateCents: v.number(), // default 500 ($5.00 placeholder)
+  freeShippingThresholdCents: v.number(), // default 2500 ($25.00)
+  contactEmail: v.string(),
+});
+
 export default defineSchema({
   products: defineTable(productValidator.fields)
     .index("by_slug", ["slug"])
@@ -138,10 +149,5 @@ export default defineSchema({
 
   // Singleton row — see ADR-0004. Read live by createCheckoutSession;
   // editable from /admin Settings without a Stripe Dashboard trip or a redeploy.
-  settings: defineTable({
-    taxEnabled: v.boolean(), // default false, see masterplan §8.1
-    shippingFlatRateCents: v.number(), // default 500 ($5.00 placeholder)
-    freeShippingThresholdCents: v.number(), // default 2500 ($25.00)
-    contactEmail: v.string(),
-  }),
+  settings: defineTable(settingsValidator.fields),
 });
