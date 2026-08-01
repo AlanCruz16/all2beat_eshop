@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatPriceCents, formatTimestamp } from "@/lib/format";
 import { OrderStatusBadge, type OrderStatus } from "../../OrderStatusBadge";
+import {
+  SubmitFeedback,
+  useServerBackedState,
+  useSubmit,
+} from "../../adminForm";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -17,66 +21,11 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-// An editable box seeded from a value the server owns. Convex queries are
-// live: a webhook or a second tab can change the order under the form, and
-// `useState` alone would keep showing what the field held when it mounted.
-// Re-seeding during render (rather than remounting on a `key`) is what lets the
-// "Saved." feedback survive the query update the save itself causes.
+// A single box seeded from a server-owned string: its own value is all there is
+// to notice a change in.
 function useServerBackedField(serverValue: string | undefined) {
   const value = serverValue ?? "";
-  const [draft, setDraft] = useState(value);
-  const [seeded, setSeeded] = useState(value);
-  if (seeded !== value) {
-    setSeeded(value);
-    setDraft(value);
-  }
-  return [draft, setDraft] as const;
-}
-
-// The two write forms below share one shape: a field, a submit that reports
-// what it's doing, and any failure said out loud rather than swallowed. The
-// mutations throw on an unauthorized caller (`requireAdmin`), and that is worth
-// showing — a silently-ignored click looks like the order simply didn't save.
-function useSubmit(run: () => Promise<unknown>) {
-  const [state, setState] = useState<
-    { status: "idle" | "saving" | "saved" } | { status: "error"; message: string }
-  >({ status: "idle" });
-
-  async function submit() {
-    setState({ status: "saving" });
-    try {
-      await run();
-      setState({ status: "saved" });
-    } catch (error) {
-      console.error(error);
-      setState({
-        status: "error",
-        message: error instanceof Error ? error.message : "Something went wrong",
-      });
-    }
-  }
-
-  return { state, submit };
-}
-
-function SubmitFeedback({
-  state,
-  savedLabel,
-}: {
-  state: ReturnType<typeof useSubmit>["state"];
-  savedLabel: string;
-}) {
-  if (state.status === "error") {
-    return (
-      <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-        {state.message}
-      </p>
-    );
-  }
-  if (state.status === "saved") {
-    return <p className="text-sm text-zinc-500">{savedLabel}</p>;
-  }
-  return null;
+  return useServerBackedState(value, value);
 }
 
 function ShipForm({

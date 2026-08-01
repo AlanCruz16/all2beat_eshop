@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import schema from "./schema";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 
 // Seam 1 (spec "Testing Decisions"): the Convex function boundary with the
@@ -71,6 +71,35 @@ async function readProduct(
   productId: Id<"products">,
 ) {
   return await t.run(async (ctx) => await ctx.db.get(productId));
+}
+
+// The real trigger, driven the way /admin drives it (ticket 10): the whole form
+// every time, with the one field this test is changing. What `save` does with
+// the rest is `products.admin.test.ts`'s business; what matters here is that a
+// product write is what puts the mirror to work.
+async function adminSave(
+  t: ReturnType<typeof convexTest>,
+  productId: Id<"products">,
+  changes: { name?: string; priceCents?: number },
+) {
+  await t
+    .withIdentity({
+      subject: "user_admin",
+      issuer: "https://clerk.test",
+      publicMetadata: { role: "admin" },
+    })
+    .mutation(api.products.save, {
+      productId,
+      slug: "cacao-crunch",
+      name: "Cacao Crunch",
+      description: "Dark cacao and toasted oats.",
+      priceCents: 499,
+      imageIds: [],
+      stock: 10,
+      active: true,
+      sortOrder: 0,
+      ...changes,
+    });
 }
 
 test("first sync creates the Stripe Product and Price and writes back both ids", async () => {
@@ -269,10 +298,7 @@ test("a product write marks it pending and schedules the sync to completion", as
     syncStatus: "synced",
   });
 
-  await t.mutation(internal.products.updateMirroredFields, {
-    productId,
-    priceCents: 599,
-  });
+  await adminSave(t, productId, { priceCents: 599 });
 
   expect(await readProduct(t, productId)).toMatchObject({
     priceCents: 599,
@@ -296,10 +322,7 @@ test("a product write clears a stale sync error before re-syncing", async () => 
     syncError: "Invalid API Key",
   });
 
-  await t.mutation(internal.products.updateMirroredFields, {
-    productId,
-    name: "Renamed",
-  });
+  await adminSave(t, productId, { name: "Renamed" });
 
   const pending = await readProduct(t, productId);
   expect(pending?.syncStatus).toBe("pending");
