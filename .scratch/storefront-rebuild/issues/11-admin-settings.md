@@ -34,3 +34,28 @@ Two findings were checked and rejected:
 
 - **"The contact page needs a redeploy to show a new email."** It doesn't — `/contact` isn't in the prerender manifest and Next builds it as `ƒ` (server-rendered on demand), so `fetchQuery(api.settings.get)` re-reads the row each request. Verified against `.next/prerender-manifest.json`, not inferred.
 - **"`ShippingSummary` restates the threshold-≤-0 rule that `lib/checkout.ts` owns."** True, and left alone: that rule already lives in `shippingOptionFor`, `freeShippingProgress`, and `FreeShippingProgress`, so unifying it is a change to the checkout math seam and its tests — not this ticket's business.
+
+### Turning the tax toggle on (Stripe Dashboard)
+
+The toggle is ours; the tax engine behind it is not. Nothing in the code has to change to flip it — verified while writing this, not assumed:
+
+- `automatic_tax: { enabled: settings.taxEnabled }` is wired from the row (`lib/checkout.ts`), so `/admin` genuinely controls it.
+- Tax needs a customer address, and checkout already collects one (`shipping_address_collection: { allowed_countries: ["US"] }`).
+- Orders already record what Stripe calculates — `taxCents: session.total_details?.amount_tax ?? 0` (`convex/http.ts`). Tax lands on orders the moment it's on.
+- Shipping sets `tax_behavior: "exclusive"` explicitly; Stripe's preset shipping tax code covers the rest.
+
+Dashboard steps, under Settings → Tax. **Do them in test mode first — it is a separate configuration from live:**
+
+1. **Head office address** — the Arizona address (the origin masterplan §8.1 refers to). Tax won't activate without it.
+2. **Default product tax code** — our Prices carry no `tax_code`, so every bar uses this one. Food is the fiddly case: prepared vs. grocery food are taxed differently by state, so this is an accountant's pick, not a sensible-looking default.
+3. **Default tax behavior** — see the decision below.
+4. **Registrations** (`/tax/locations`) — add Arizona. This is the step the toggle has been waiting on. Without a registration in the customer's state, Tax calculates **zero** rather than erroring, so a checkout that "works" proves nothing until this exists.
+5. No Dashboard integration toggle is needed for Checkout Sessions — the API flag is what enables it, and we already send it.
+
+**The decision that actually matters.** §8.1 records tax as currently *absorbed into the price*, so step 3 decides who absorbs it: **exclusive** adds tax on top (a $4.99 bar rings up at ~$5.44 — margin preserved, customer pays more), **inclusive** carves it out of the $4.99 (shelf price unchanged, revenue per bar drops). "Absorbed into price" describes inclusive, so choosing exclusive is a real price increase and not a config detail.
+
+`stripeSync.ts` creates Prices without `tax_behavior`, so they inherit whichever account default is set — convenient, in that switching needs no re-mirroring, but set that default *explicitly* rather than leaving it on "Automatic", where behavior is inferred from currency. A Price that does carry a behavior is immutable, so per-product control later means create-new-Price — the same path a price change already takes.
+
+**Order of operations:** configure test mode → test checkout with an Arizona address, confirm tax appears and reaches `taxCents` on the order → repeat in live mode → *then* flip the toggle in `/admin`. The toggle is last, and it is the only step that isn't a Dashboard trip.
+
+Two things worth watching: §8.1 names Arizona, but shipping enough volume into other states can trigger economic nexus there too — `/tax/transactions` monitors that and says where registration may be needed. And Stripe calculates and collects; **filing and remitting is separate** (Stripe Tax's filing product, or the accountant). Masterplan §9's launch checklist already carries the "Stripe Tax configured (or explicitly declined in writing)" line this satisfies.
